@@ -9,6 +9,7 @@ const draftRoutes = require('./routes/draftRoutes');
 
 const app = express();
 app.use(cors());
+
 app.use(bodyParser.json());
 
 // MongoDB connection

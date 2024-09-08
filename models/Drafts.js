@@ -4,6 +4,7 @@ const DraftSchema = new mongoose.Schema({
   title: String,
   bodyofcontent: String,
   endnotecontent: String,
+  imageUrl: String,
 });
 
 const Draft = mongoose.model('drafts', DraftSchema);
