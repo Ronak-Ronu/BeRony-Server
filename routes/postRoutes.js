@@ -2,11 +2,12 @@ const express = require('express');
 const router = express.Router();
 const Post = require('../models/Posts');
 const multer = require('multer');
+const fs=require('fs')
 const upload = multer({
   dest: 'uploads/',
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB limit
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB limit
   fileFilter(req, file, cb) {
-    if (!file.originalname.match(/\.(jpg|jpeg|png)$/)) {
+    if (!file.originalname.match(/\.(jpg|jpeg|png|svg)$/)) {
       return cb(new Error('Please upload an image'));
     }
     cb(null, true);
@@ -74,7 +75,16 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
 
       await newPost.save();
       console.log(newPost);
-      
+
+      fs.unlink(req.file.path, (err) => {
+        if (err) {
+          console.error('error in deleting :', err);
+        } else {
+          console.log('file deleted');
+        }
+      });
+      console.log(newPost);
+
       res.json(newPost);
     } else {
       // If no file is uploaded, return an error
@@ -95,8 +105,22 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
 
 
 router.get('/posts', async (req, res) => {
-  const posts = await Post.find();
-  res.json(posts);
+  // const posts = await Post.find();
+  // res.json(posts);
+  try {
+    const query = req.query.q || ''; // Get the query parameter
+    const regex = new RegExp(query, 'i'); // Create a case-insensitive regex pattern
+    const posts = await Post.find({
+      $or: [
+        { title: { $regex: regex } },
+        { bodyofcontent: { $regex: regex } }
+      ]
+    });
+    res.json(posts);
+  } catch (error) {
+    console.error('Error fetching posts:', error);
+  }
+
 });
 
 router.get('/posts/:id',async(req,res)=>{
