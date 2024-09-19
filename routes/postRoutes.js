@@ -3,6 +3,9 @@ const router = express.Router();
 const Post = require('../models/Posts');
 const multer = require('multer');
 const fs=require('fs')
+
+
+
 const upload = multer({
   dest: 'uploads/',
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB limit
@@ -108,8 +111,8 @@ router.get('/posts', async (req, res) => {
   // const posts = await Post.find();
   // res.json(posts);
   try {
-    const query = req.query.q || ''; // Get the query parameter
-    const regex = new RegExp(query, 'i'); // Create a case-insensitive regex pattern
+    const query = req.query.q || ''; 
+    const regex = new RegExp(query, 'i');
     const posts = await Post.find({
       $or: [
         { title: { $regex: regex } },
@@ -133,6 +136,40 @@ router.delete('/posts/:id', async (req, res) => {
   await Post.findByIdAndDelete(req.params.id);
   res.json({ message: 'Post deleted' });
 });
+
+router.patch('/posts/like/:id', async (req, res) => {
+  const { emoji, increment } = req.body; 
+  
+  // Log the incoming data for debugging
+  console.log('Request body:', req.body);
+  console.log('Post ID:', req.params.id);
+
+  if (!emoji || increment === undefined) {
+    return res.status(400).json({ error: 'Invalid request data' });
+  }
+
+  try {
+    const updateField = `${emoji}count`;  // e.g., funnyCount, sadCount, etc.
+    
+    // Log the field being updated
+    console.log('Updating field:', updateField);
+    
+    const update = { $inc: { [updateField]: increment ? 1 : -1 } };
+    
+    // Find the post by ID and update the count
+    const post = await Post.findByIdAndUpdate(req.params.id, update, { new: true });
+    
+    if (!post) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+    
+    res.json(post);
+  } catch (error) {
+    console.error('Error updating post:', error);
+    res.status(500).json({ error: 'Cannot like the post' });
+  }
+});
+
 
 
 module.exports = router;
