@@ -3,7 +3,8 @@ const router = express.Router();
 const Post = require('../models/Posts');
 const multer = require('multer');
 const fs=require('fs')
-
+const Redis=require('ioredis')
+require('dotenv').config();
 
 
 const upload = multer({
@@ -17,7 +18,16 @@ const upload = multer({
   }
 });
 
-require('dotenv').config();
+
+const redisclient = new Redis({
+  host: process.env.REDIS_HOST  ,
+  password: process.env.REDIS_PASSWORD ,
+  port: process.env.REDIS_PORT
+});
+
+redisclient.on('connect',()=>{
+  console.log("redis is connected");
+})
 
 const cloudinary = require('../cloudinaryconfig')
 // const multer = require('multer');
@@ -110,15 +120,27 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
 router.get('/posts', async (req, res) => {
   // const posts = await Post.find();
   // res.json(posts);
+  const isExist= await redisclient.exists("posts")
+  let posts=await redisclient.get("posts")
   try {
+    if(isExist)
+    {
+      console.log("getting from redis");
+      posts=await redisclient.get("posts")
+      return res.json(posts)
+      
+    }
     const query = req.query.q || ''; 
     const regex = new RegExp(query, 'i');
-    const posts = await Post.find({
+
+    posts = await Post.find({
       $or: [
         { title: { $regex: regex } },
         { bodyofcontent: { $regex: regex } }
       ]
     });
+    redisclient.set("posts",JSON.stringify(posts))
+
     res.json(posts);
   } catch (error) {
     console.error('Error fetching posts:', error);
@@ -137,26 +159,20 @@ router.delete('/posts/:id', async (req, res) => {
   res.json({ message: 'Post deleted' });
 });
 
+
+
 router.patch('/posts/like/:id', async (req, res) => {
   const { emoji, increment } = req.body; 
-  
-  // Log the incoming data for debugging
-  console.log('Request body:', req.body);
-  console.log('Post ID:', req.params.id);
-
-  if (!emoji || increment === undefined) {
-    return res.status(400).json({ error: 'Invalid request data' });
-  }
+    // console.log('Request body:', req.body);
+  // console.log('Post ID:', req.params.id);
 
   try {
-    const updateField = `${emoji}count`;  // e.g., funnyCount, sadCount, etc.
+    const updateField = `${emoji}count`;
     
-    // Log the field being updated
-    console.log('Updating field:', updateField);
+    // console.log('Updating field:', updateField);
     
     const update = { $inc: { [updateField]: increment ? 1 : -1 } };
     
-    // Find the post by ID and update the count
     const post = await Post.findByIdAndUpdate(req.params.id, update, { new: true });
     
     if (!post) {
