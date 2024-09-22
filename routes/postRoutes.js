@@ -120,13 +120,16 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
 router.get('/posts', async (req, res) => {
   // const posts = await Post.find();
   // res.json(posts);
+
+
   const isExist= await redisclient.exists("posts")
-  let posts=await redisclient.get("posts")
+  let posts;
   try {
     if(isExist)
     {
       console.log("getting from redis");
-      posts=await redisclient.get("posts")
+      let redisdata=await redisclient.get("posts")
+      posts=JSON.parse(redisdata)
       return res.json(posts)
       
     }
@@ -142,6 +145,7 @@ router.get('/posts', async (req, res) => {
     redisclient.set("posts",JSON.stringify(posts))
 
     res.json(posts);
+
   } catch (error) {
     console.error('Error fetching posts:', error);
   }
