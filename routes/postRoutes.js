@@ -118,38 +118,43 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
 
 
 router.get('/posts', async (req, res) => {
-  // const posts = await Post.find();
-  // res.json(posts);
+  const query = req.query.q || ''; 
+  const regex = new RegExp(query, 'i');
 
-
-  const isExist= await redisclient.exists("posts")
-  let posts;
   try {
-    if(isExist)
-    {
-      console.log("getting from redis");
-      let redisdata=await redisclient.get("posts")
-      posts=JSON.parse(redisdata)
-      return res.json(posts)
-      
-    }
-    const query = req.query.q || ''; 
-    const regex = new RegExp(query, 'i');
+    let posts;
 
-    posts = await Post.find({
-      $or: [
-        { title: { $regex: regex } },
-        { bodyofcontent: { $regex: regex } }
-      ]
-    });
-    redisclient.set("posts",JSON.stringify(posts))
+    // Check if a search query is provided
+    if (query) {
+      // Perform search without using cache since the query is dynamic
+      posts = await Post.find({
+        $or: [
+          { title: { $regex: regex } },
+          { bodyofcontent: { $regex: regex } }
+        ]
+      });
+    } else {
+      // If no search query, check if posts are cached in Redis
+      const isExist = await redisclient.exists("posts");
+
+      if (isExist) {
+        console.log("Fetching posts from Redis cache...");
+        const redisdata = await redisclient.get("posts");
+        posts = JSON.parse(redisdata);
+      } else {
+        // Fetch posts from the database if not cached
+        posts = await Post.find();
+        // Cache the posts in Redis
+        await redisclient.set("posts", JSON.stringify(posts));
+      }
+    }
 
     res.json(posts);
 
   } catch (error) {
     console.error('Error fetching posts:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
   }
-
 });
 
 router.get('/posts/:id',async(req,res)=>{
@@ -159,8 +164,20 @@ router.get('/posts/:id',async(req,res)=>{
 
 
 router.delete('/posts/:id', async (req, res) => {
-  await Post.findByIdAndDelete(req.params.id);
-  res.json({ message: 'Post deleted' });
+  try {
+    const deletedPost = await Post.findByIdAndDelete(req.params.id);
+    
+    if (!deletedPost) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+
+    await redisclient.del("posts");
+
+    res.json({ message: 'Post deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting post:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
 });
 
 
