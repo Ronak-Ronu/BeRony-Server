@@ -73,12 +73,14 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
     console.log('File path:', filePath);
 
       if (req.file) {
-      // Process the file (upload to Cloudinary or local storage)
       const resultimageurl = await cloudinary.uploader.upload(req.file.path, {
         folder: 'BlogData',
       });
 
-      // Save post with the uploaded image URL
+      
+
+
+
       const newPost = new Post({
         title: req.body.title,
         bodyofcontent: req.body.bodyofcontent,
@@ -87,7 +89,10 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
       });
 
       await newPost.save();
+      await redisclient.del("posts");
+
       console.log(newPost);
+
 
       fs.unlink(req.file.path, (err) => {
         if (err) {
@@ -124,9 +129,7 @@ router.get('/posts', async (req, res) => {
   try {
     let posts;
 
-    // Check if a search query is provided
     if (query) {
-      // Perform search without using cache since the query is dynamic
       posts = await Post.find({
         $or: [
           { title: { $regex: regex } },
@@ -134,7 +137,6 @@ router.get('/posts', async (req, res) => {
         ]
       });
     } else {
-      // If no search query, check if posts are cached in Redis
       const isExist = await redisclient.exists("posts");
 
       if (isExist) {
@@ -157,10 +159,31 @@ router.get('/posts', async (req, res) => {
   }
 });
 
-router.get('/posts/:id',async(req,res)=>{
-  const post = await Post.findById(req.params.id);
-  res.json(post);
-})
+// router.get('/posts/:id',async(req,res)=>{
+//   const post = await Post.findById(req.params.id);
+//   res.json(post);
+// })
+router.get('/posts/:id', async (req, res) => {
+  try {
+    const cacheKey = `post:${req.params.id}`;
+    const cachedPost = await redisclient.get(cacheKey);
+
+    if (cachedPost) {
+      console.log("Fetching post from Redis cache...");
+      return res.json(JSON.parse(cachedPost));
+    }
+
+    const post = await Post.findById(req.params.id);
+    if (!post) return res.status(404).json({ message: 'Post not found' });
+
+    // Cache the post
+    await redisclient.set(cacheKey, JSON.stringify(post));
+    res.json(post);
+  } catch (error) {
+    console.error('Error fetching post:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
 
 
 router.delete('/posts/:id', async (req, res) => {
@@ -172,7 +195,7 @@ router.delete('/posts/:id', async (req, res) => {
     }
 
     await redisclient.del("posts");
-
+    await redisclient.del(`post:${req.params.id}`);
     res.json({ message: 'Post deleted successfully' });
   } catch (error) {
     console.error('Error deleting post:', error);
@@ -199,7 +222,8 @@ router.patch('/posts/like/:id', async (req, res) => {
     if (!post) {
       return res.status(404).json({ error: 'Post not found' });
     }
-    
+    await redisclient.del("posts");
+    await redisclient.del(`post:${req.params.id}`); 
     res.json(post);
   } catch (error) {
     console.error('Error updating post:', error);
