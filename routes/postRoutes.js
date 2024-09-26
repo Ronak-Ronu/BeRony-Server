@@ -77,15 +77,15 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
         folder: 'BlogData',
       });
 
-      
-
-
 
       const newPost = new Post({
         title: req.body.title,
         bodyofcontent: req.body.bodyofcontent,
         endnotecontent: req.body.endnotecontent,
         imageUrl: resultimageurl.secure_url,
+        userId: req.body.userId,
+        username: req.body.username,
+        createdAt: req.body.createdAt
       });
 
       await newPost.save();
@@ -188,7 +188,9 @@ router.get('/posts/:id', async (req, res) => {
 
 router.delete('/posts/:id', async (req, res) => {
   try {
-    const deletedPost = await Post.findByIdAndDelete(req.params.id);
+    const postid=req.params.id;
+
+    const deletedPost = await Post.findByIdAndDelete(postid);
     
     if (!deletedPost) {
       return res.status(404).json({ message: 'Post not found' });
