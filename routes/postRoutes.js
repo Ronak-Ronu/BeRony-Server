@@ -71,6 +71,8 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
     console.log('File:', req.file);
     const filePath = req.file.path;
     console.log('File path:', filePath);
+    const tagsArray = JSON.parse(req.body.tags);
+
 
       if (req.file) {
       const resultimageurl = await cloudinary.uploader.upload(req.file.path, {
@@ -85,7 +87,8 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
         imageUrl: resultimageurl.secure_url,
         userId: req.body.userId,
         username: req.body.username,
-        createdAt: new Date()
+        createdAt: new Date(),
+        tags:tagsArray
       });
 
       await newPost.save();
