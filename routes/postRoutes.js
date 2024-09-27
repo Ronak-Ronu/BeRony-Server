@@ -85,7 +85,7 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
         imageUrl: resultimageurl.secure_url,
         userId: req.body.userId,
         username: req.body.username,
-        createdAt: req.body.createdAt
+        createdAt: new Date()
       });
 
       await newPost.save();
