@@ -127,12 +127,17 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
 
 router.get('/posts', async (req, res) => {
   const query = req.query.q || ''; 
+  const tag = req.query.tags || null;
   const regex = new RegExp(query, 'i');
 
   try {
     let posts;
-
-    if (query) {
+    if(tag)
+    {
+      posts=await Post.find({tags:tag})
+    }
+    
+    else if (query) {
       posts = await Post.find({
         $or: [
           { title: { $regex: regex } },
@@ -140,6 +145,7 @@ router.get('/posts', async (req, res) => {
         ]
       });
     } else {
+    
       const isExist = await redisclient.exists("posts");
 
       if (isExist) {
