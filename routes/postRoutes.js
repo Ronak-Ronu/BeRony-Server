@@ -73,7 +73,6 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
     console.log('File path:', filePath);
     const tagsArray = JSON.parse(req.body.tags);
 
-
       if (req.file) {
       const resultimageurl = await cloudinary.uploader.upload(req.file.path, {
         folder: 'BlogData',
@@ -121,29 +120,40 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
 //     blogPost.imageUrl = req.file.path;
 //     await blogPost.save();
 //     res.status(200).json({ message: 'Image uploaded and linked successfully', blogPost });
-
 // })
 
 
 router.get('/posts', async (req, res) => {
   const query = req.query.q || ''; 
   const tag = req.query.tags || null;
-  const regex = new RegExp(query, 'i');
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 4; 
+  const skip = (page - 1) * limit; 
 
   try {
     let posts;
     if(tag)
     {
-      posts=await Post.find({tags:tag})
+      posts=await Post.find({tags:tag}).skip(skip).limit(limit);
     }
     
     else if (query) {
-      posts = await Post.find({
+      const decodedQuery = decodeURIComponent(query.trim()); 
+      const searchWords = decodedQuery.split(/\s+/); 
+
+
+      const searchConditions = searchWords.map(word => ({
         $or: [
-          { title: { $regex: regex } },
-          { bodyofcontent: { $regex: regex } }
+          { title: { $regex: word, $options: 'i' } }, // 'i'  is for case-insensitive search
+          { bodyofcontent: { $regex: word, $options: 'i' } }
         ]
-      });
+      }));
+      // console.log(searchWords);
+      posts = await Post.find({
+        $and: searchConditions
+      }).skip(skip).limit(limit);
+
+
     } else {
     
       const isExist = await redisclient.exists("posts");
@@ -151,15 +161,21 @@ router.get('/posts', async (req, res) => {
       if (isExist) {
         console.log("Fetching posts from Redis cache...");
         const redisdata = await redisclient.get("posts");
-        posts = JSON.parse(redisdata);
+        const cachedPosts = JSON.parse(redisdata);
+        posts = cachedPosts.slice(skip, skip + limit);
+        // posts = JSON.parse(redisdata)
       } else {
         // Fetch posts from the database if not cached
-        posts = await Post.find();
+
+        posts = await Post.find().skip(skip).limit(limit);
         // Cache the posts in Redis
-        await redisclient.set("posts", JSON.stringify(posts));
+        await redisclient.set("posts", JSON.stringify(posts),'EX', 86400);
       }
     }
+// console.log(totalPosts);
 
+
+    
     res.json(posts);
 
   } catch (error) {
@@ -168,10 +184,6 @@ router.get('/posts', async (req, res) => {
   }
 });
 
-// router.get('/posts/:id',async(req,res)=>{
-//   const post = await Post.findById(req.params.id);
-//   res.json(post);
-// })
 router.get('/posts/:id', async (req, res) => {
   try {
     const cacheKey = `post:${req.params.id}`;
@@ -186,7 +198,7 @@ router.get('/posts/:id', async (req, res) => {
     if (!post) return res.status(404).json({ message: 'Post not found' });
 
     // Cache the post
-    await redisclient.set(cacheKey, JSON.stringify(post));
+    await redisclient.set(cacheKey, JSON.stringify(post),'EX', 86400);
     res.json(post);
   } catch (error) {
     console.error('Error fetching post:', error);
