@@ -4,14 +4,15 @@ const Post = require('../models/Posts');
 const multer = require('multer');
 const fs=require('fs')
 const Redis=require('ioredis')
+const cloudinary = require('../cloudinaryconfig')
 require('dotenv').config();
 
 
 const upload = multer({
   dest: 'uploads/',
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB limit
+  limits: { fileSize: 15 * 1024 * 1024 }, // 10 MB limit
   fileFilter(req, file, cb) {
-    if (!file.originalname.match(/\.(jpg|jpeg|png|svg)$/)) {
+    if (!file.originalname.match(/\.(jpg|jpeg|png|svg|gif)$/)) {
       return cb(new Error('Please upload an image'));
     }
     cb(null, true);
@@ -29,39 +30,6 @@ redisclient.on('connect',()=>{
   console.log("redis is connected");
 })
 
-const cloudinary = require('../cloudinaryconfig')
-// const multer = require('multer');
-// const { CloudinaryStorage } = require('multer-storage-cloudinary');
-
-// const storage = new CloudinaryStorage({
-//   cloudinary: cloudinary,
-//   params: {
-//     folder: 'BlogData', 
-//     allowedFormats: ['jpg', 'png', 'jpeg'],
-//   },
-// });
-// const upload = multer({ storage });
-
-
-// router.post('/posts', async (req, res) => {
-//   const {title,bodyofcontent,endnotecontent,imageUrl} = req.body;
-
-//   const resultimageurl= await cloudinary.uploader.upload(imageUrl,
-//     {
-//       folder:'BlogData'
-//     }
-//   )
-//   const newPost = new Post(
-//     {
-//       title,
-//       bodyofcontent,
-//       endnotecontent,
-//       imageUrl:resultimageurl.secure_url
-//     }
-//   );
-//   await newPost.save();
-//   res.json(newPost);
-// });
 
 router.post('/posts', upload.single('imageUrl'), async (req, res) => {
   try {
@@ -116,25 +84,19 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
   }
 });
 
-// router.post('/uploadimage', upload.single('image'), async (req, res) => {
-//     blogPost.imageUrl = req.file.path;
-//     await blogPost.save();
-//     res.status(200).json({ message: 'Image uploaded and linked successfully', blogPost });
-// })
-
 
 router.get('/posts', async (req, res) => {
   const query = req.query.q || ''; 
   const tag = req.query.tags || null;
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 4; 
-  const skip = (page - 1) * limit; 
+  const { start=0, limit=3 } = req.query; 
+
+  const cacheKey = `posts:${start}:${limit}`;
 
   try {
     let posts;
     if(tag)
     {
-      posts=await Post.find({tags:tag}).skip(skip).limit(limit);
+      posts=await Post.find({tags:tag}).sort({ createdAt: -1 }).skip(parseInt(start)).limit(parseInt(limit));
     }
     
     else if (query) {
@@ -151,25 +113,28 @@ router.get('/posts', async (req, res) => {
       // console.log(searchWords);
       posts = await Post.find({
         $and: searchConditions
-      }).skip(skip).limit(limit);
+      }).sort({ createdAt: -1 }).skip(parseInt(start)).limit(parseInt(limit));
 
 
     } else {
     
-      const isExist = await redisclient.exists("posts");
+      const isExist = await redisclient.exists(cacheKey);
 
       if (isExist) {
         console.log("Fetching posts from Redis cache...");
-        const redisdata = await redisclient.get("posts");
-        const cachedPosts = JSON.parse(redisdata);
-        posts = cachedPosts.slice(skip, skip + limit);
-        // posts = JSON.parse(redisdata)
+        const redisdata = await redisclient.get(cacheKey);
+
+        posts = JSON.parse(redisdata)
+
+
+        
       } else {
         // Fetch posts from the database if not cached
 
-        posts = await Post.find().skip(skip).limit(limit);
+        posts = await Post.find().sort({ createdAt: -1 }).skip(parseInt(start)).limit(parseInt(limit));
         // Cache the posts in Redis
-        await redisclient.set("posts", JSON.stringify(posts),'EX', 86400);
+        await redisclient.set(cacheKey, JSON.stringify(posts),'EX', 86400);
+      
       }
     }
 // console.log(totalPosts);
@@ -252,6 +217,21 @@ router.patch('/posts/like/:id', async (req, res) => {
     console.error('Error updating post:', error);
     res.status(500).json({ error: 'Cannot like the post' });
   }
+});
+
+router.delete('/clear-posts', async (req, res) => {
+    try {
+        // Delete the "posts" key from Redis
+        await redisclient.del("posts");
+        
+        // Optionally, you can also delete individual post keys if needed
+        // await redisclient.del(`post:${postId}`);
+
+        res.json({ message: 'Posts cache cleared successfully.' });
+    } catch (error) {
+        console.error('Error clearing posts:', error);
+        res.status(500).json({ message: 'Internal Server Error' });
+    }
 });
 
 
