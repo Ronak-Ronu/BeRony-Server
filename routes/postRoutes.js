@@ -86,41 +86,39 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
 
 
 router.get('/posts', async (req, res) => {
-  const query = req.query.q || ''; 
-  const tag = req.query.tags || null;
+  // const query = req.query.q || ''; 
+  // const tag = req.query.tags || '';
   const { start=0, limit=3 } = req.query; 
 
   const cacheKey = `posts:${start}:${limit}`;
 
   try {
     let posts;
-    if(tag)
-    {
-      posts=await Post.find({tags:tag}).sort({ createdAt: -1 }).skip(parseInt(start)).limit(parseInt(limit));
-    }
     
-    else if (query) {
-      const decodedQuery = decodeURIComponent(query.trim()); 
-      const searchWords = decodedQuery.split(/\s+/); 
+    // if(tag)
+    //   {
+    //     posts=await Post.find({tags:tag}).sort({ createdAt: -1 }).skip(parseInt(start)).limit(parseInt(limit));
+    //   }
+    // else if (query) {
+    //   const decodedQuery = decodeURIComponent(query.trim()); 
+    //   const searchWords = decodedQuery.split(/\s+/); 
 
 
-      const searchConditions = searchWords.map(word => ({
-        $or: [
-          { title: { $regex: word, $options: 'i' } }, // 'i'  is for case-insensitive search
-          { bodyofcontent: { $regex: word, $options: 'i' } }
-        ]
-      }));
-      // console.log(searchWords);
-      posts = await Post.find({
-        $and: searchConditions
-      }).sort({ createdAt: -1 }).skip(parseInt(start)).limit(parseInt(limit));
-
-
-    } else {
+    //   const searchConditions = searchWords.map(word => ({
+    //     $or: [
+    //       { title: { $regex: word, $options: 'i' } }, // 'i'  is for case-insensitive search
+    //       { bodyofcontent: { $regex: word, $options: 'i' } }
+    //     ]
+    //   }));
+    //   // console.log(searchWords);
+    //   posts = await Post.find({
+    //     $and: searchConditions
+    //   }).sort({ createdAt: -1 }).skip(parseInt(start)).limit(parseInt(limit));
+    // }
     
       const isExist = await redisclient.exists(cacheKey);
 
-      if (isExist) {
+      if(isExist) {
         console.log("Fetching posts from Redis cache...");
         const redisdata = await redisclient.get(cacheKey);
 
@@ -136,11 +134,7 @@ router.get('/posts', async (req, res) => {
         await redisclient.set(cacheKey, JSON.stringify(posts),'EX', 86400);
       
       }
-    }
 // console.log(totalPosts);
-
-
-    
     res.json(posts);
 
   } catch (error) {
@@ -148,6 +142,41 @@ router.get('/posts', async (req, res) => {
     res.status(500).json({ message: 'Internal Server Error' });
   }
 });
+
+router.get('/findpost', async (req, res) => {
+  const { q: query = '', tags: tag = '', start = 0, limit = 3 } = req.query
+
+  try {
+    let posts;
+    if(tag)
+    {
+        posts=await Post.find({tags:tag}).sort({ createdAt: -1 }).skip(parseInt(start)).limit(parseInt(limit));
+    }
+    else if(query) {
+      const decodedQuery = decodeURIComponent(query.trim());
+
+      const searchWords = decodedQuery.split(/\s+/);
+
+      const searchConditions = searchWords.map(word => ({
+        $or: [
+          { title: { $regex: word, $options: 'i' } }, // 'i' makes it case-insensitive
+          { bodyofcontent: { $regex: word, $options: 'i' } }
+        ]
+      }))
+      posts = await Post.find({ $and: searchConditions }).sort({ createdAt: -1 });
+
+    } else {
+      posts = await Post.find().sort({ createdAt: -1 });
+    }
+    res.json(posts);
+
+  } catch (error) {
+    console.error('Error fetching query posts:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
+
 
 router.get('/posts/:id', async (req, res) => {
   try {
