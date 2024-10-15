@@ -29,6 +29,9 @@ const redisclient = new Redis({
 redisclient.on('connect',()=>{
   console.log("redis is connected");
 })
+redisclient.on('error', (err) => {
+  console.error('Redis error:', err);
+});
 
 
 router.post('/posts', upload.single('imageUrl'), async (req, res) => {
@@ -60,6 +63,9 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
 
       await newPost.save();
       await redisclient.del("posts");
+      await redisclient.del(`posts:0:3`); 
+      await redisclient.del(`posts:3:3`); 
+  
 
       console.log(newPost);
 
@@ -131,8 +137,7 @@ router.get('/posts', async (req, res) => {
 
         posts = await Post.find().sort({ createdAt: -1 }).skip(parseInt(start)).limit(parseInt(limit));
         // Cache the posts in Redis
-        await redisclient.set(cacheKey, JSON.stringify(posts),'EX', 86400);
-      
+        await redisclient.setex("posts", 3600, JSON.stringify(posts));      
       }
 // console.log(totalPosts);
     res.json(posts);
@@ -210,9 +215,13 @@ router.delete('/posts/:id', async (req, res) => {
     if (!deletedPost) {
       return res.status(404).json({ message: 'Post not found' });
     }
+    await redisclient.del("posts"); 
+    await redisclient.del(`post:${postid}`); 
 
-    await redisclient.del("posts");
-    await redisclient.del(`post:${req.params.id}`);
+    await redisclient.del(`posts:0:3`);
+    await redisclient.del(`posts:3:3`);
+
+
     res.json({ message: 'Post deleted successfully' });
   } catch (error) {
     console.error('Error deleting post:', error);
@@ -248,21 +257,26 @@ router.patch('/posts/like/:id', async (req, res) => {
   }
 });
 
+// Clear all posts cache
 router.delete('/clear-posts', async (req, res) => {
-    try {
-        // Delete the "posts" key from Redis
-        await redisclient.del("posts");
-        
-        // Optionally, you can also delete individual post keys if needed
-        // await redisclient.del(`post:${postId}`);
+  try {
+    // Get all keys related to posts
+    const keys = await redisclient.keys('posts:*');
 
-        res.json({ message: 'Posts cache cleared successfully.' });
-    } catch (error) {
-        console.error('Error clearing posts:', error);
-        res.status(500).json({ message: 'Internal Server Error' });
+    // Delete all the keys
+    if (keys.length > 0) {
+      await redisclient.del(keys);
+      console.log(`Deleted keys: ${keys.join(', ')}`);
     }
+
+    // Optionally, you can also delete a specific key if needed
+    // await redisclient.del('posts'); // Delete the global posts cache if you have one
+
+    res.json({ message: 'All posts cache cleared successfully.' });
+  } catch (error) {
+    console.error('Error clearing posts cache:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
 });
-
-
 
 module.exports = router;
