@@ -48,13 +48,13 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
       const resultimageurl = await cloudinary.uploader.upload(req.file.path, {
         folder: 'BlogData',
       });
-
+      const newresultimageurl=`https://res.cloudinary.com/beronyimages/image/upload/${resultimageurl.public_id}`
 
       const newPost = new Post({
         title: req.body.title,
         bodyofcontent: req.body.bodyofcontent,
         endnotecontent: req.body.endnotecontent,
-        imageUrl: resultimageurl.secure_url,
+        imageUrl: newresultimageurl,
         userId: req.body.userId,
         username: req.body.username,
         createdAt: new Date(),
@@ -92,8 +92,6 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
 
 
 router.get('/posts', async (req, res) => {
-  // const query = req.query.q || ''; 
-  // const tag = req.query.tags || '';
   const { start=0, limit=3 } = req.query; 
 
   const cacheKey = `posts:${start}:${limit}`;
@@ -101,26 +99,6 @@ router.get('/posts', async (req, res) => {
   try {
     let posts;
     
-    // if(tag)
-    //   {
-    //     posts=await Post.find({tags:tag}).sort({ createdAt: -1 }).skip(parseInt(start)).limit(parseInt(limit));
-    //   }
-    // else if (query) {
-    //   const decodedQuery = decodeURIComponent(query.trim()); 
-    //   const searchWords = decodedQuery.split(/\s+/); 
-
-
-    //   const searchConditions = searchWords.map(word => ({
-    //     $or: [
-    //       { title: { $regex: word, $options: 'i' } }, // 'i'  is for case-insensitive search
-    //       { bodyofcontent: { $regex: word, $options: 'i' } }
-    //     ]
-    //   }));
-    //   // console.log(searchWords);
-    //   posts = await Post.find({
-    //     $and: searchConditions
-    //   }).sort({ createdAt: -1 }).skip(parseInt(start)).limit(parseInt(limit));
-    // }
     
       const isExist = await redisclient.exists(cacheKey);
 

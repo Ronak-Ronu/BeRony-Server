@@ -21,7 +21,17 @@ mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopol
 app.use('/api', postRoutes);
 app.use('/api', draftRoutes);
 
+function sendRequest() {
+          console.log(`Keep-alive request successful`);
+     
+}
+
+function keepAlive() {
+  setInterval(sendRequest, 10 * 60 * 1000);
+}
+
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
+  keepAlive();
 });
