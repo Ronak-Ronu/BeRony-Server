@@ -22,16 +22,20 @@ app.use('/api', postRoutes);
 app.use('/api', draftRoutes);
 
 function sendRequest() {
-          console.log(`Keep-alive request successful`);
-     
+  axios.get(process.env.API_LIVE_URL)
+      .then(response => {
+          console.log(`Keep-alive request successful with status: ${response.status}`);
+      })
+      .catch(error => {
+          console.error('Error in keep-alive request:', error.message);
+      });
 }
 
 function keepAlive() {
-  setInterval(sendRequest, 10 * 60 * 1000);
+  setInterval(sendRequest, 12 * 60 * 1000);  
 }
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
-  keepAlive();
 });
