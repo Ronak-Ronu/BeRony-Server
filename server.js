@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 require('dotenv').config();
+const axios = require('axios');
 
 const postRoutes = require('./routes/postRoutes');
 const draftRoutes = require('./routes/draftRoutes');
