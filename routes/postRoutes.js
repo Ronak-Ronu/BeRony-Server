@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Post = require('../models/Posts');
+const Bookmark=require('../models/Bookmark')
 const multer = require('multer');
 const fs=require('fs')
 const Redis=require('ioredis')
@@ -247,14 +248,66 @@ router.delete('/clear-posts', async (req, res) => {
       console.log(`Deleted keys: ${keys.join(', ')}`);
     }
 
-    // Optionally, you can also delete a specific key if needed
-    // await redisclient.del('posts'); // Delete the global posts cache if you have one
-
     res.json({ message: 'All posts cache cleared successfully.' });
   } catch (error) {
     console.error('Error clearing posts cache:', error);
     res.status(500).json({ message: 'Internal Server Error' });
   }
 });
+
+
+
+router.post('/users/:userId/bookmarks', async (req, res) => {
+  const userId = req.params.userId;
+  const { postId } = req.body;
+
+  try {
+    const existingBookmark = await Bookmark.findOne({ userId, postId });
+    if (existingBookmark) {
+      return res.status(400).json({ message: 'Blog is already bookmarked.' });
+    }
+
+    const newBookmark = new Bookmark({ userId, postId });
+    await newBookmark.save();
+
+    res.status(201).json({ message: 'Blog bookmarked successfully.' });
+  } catch (error) {
+    console.error('Error bookmarking blog:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
+router.delete('/users/:userId/bookmarks/:postId', async (req, res) => {
+  const { userId, postId } = req.params;
+
+  try {
+    // Find and delete the bookmark
+    const deletedBookmark = await Bookmark.findOneAndDelete({ userId, postId });
+    if (!deletedBookmark) {
+      return res.status(404).json({ message: 'Bookmark not found.' });
+    }
+
+    res.json({ message: 'Bookmark removed successfully.' });
+  } catch (error) {
+    console.error('Error removing bookmark:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
+router.get('/users/:userId/bookmarks', async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    // Find bookmarks for the user and populate the post data
+    const bookmarks = await Bookmark.find({ userId }).populate('postId');
+    res.json(bookmarks.map(bookmark => bookmark.postId));
+  } catch (error) {
+    console.error('Error fetching bookmarked blogs:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
+
+
 
 module.exports = router;
