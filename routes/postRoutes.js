@@ -180,10 +180,26 @@ router.get('/posts/:id', async (req, res) => {
     res.json(post);
   } catch (error) {
     console.error('Error fetching post:', error);
-    res.status(500).json({ message: 'Internal Server Error' });
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 
+router.get('/user/:username/posts',async (req,res)=>{
+  const { username } = req.params;
+  try{
+    const posts = await Post.find({ username }).sort({ createdAt: -1 });
+
+    if (!posts.length) {
+      return res.status(404).json({ message: 'No posts found for this user.' });
+    }
+    res.json(posts);
+  }
+  catch(error){
+    console.error('Error fetching post:', error);
+    res.status(500).json({message:'Internal server error'})
+  }
+
+})
 
 router.delete('/posts/:id', async (req, res) => {
   try {
