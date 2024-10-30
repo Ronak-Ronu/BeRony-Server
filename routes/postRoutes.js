@@ -6,6 +6,7 @@ const multer = require('multer');
 const fs=require('fs')
 const Redis=require('ioredis')
 const cloudinary = require('../cloudinaryconfig')
+const mongoose=require('mongoose')
 require('dotenv').config();
 
 
@@ -276,6 +277,7 @@ router.delete('/clear-posts', async (req, res) => {
 router.post('/users/:userId/bookmarks', async (req, res) => {
   const userId = req.params.userId;
   const { postId } = req.body;
+  console.log('Received request to add bookmark:', req.body);
 
   try {
     const existingBookmark = await Bookmark.findOne({ userId, postId });
@@ -319,6 +321,39 @@ router.get('/users/:userId/bookmarks', async (req, res) => {
     res.json(bookmarks.map(bookmark => bookmark.postId));
   } catch (error) {
     console.error('Error fetching bookmarked blogs:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
+router.patch('/user/:userId/bio', async (req, res) => {
+  const { userId } = req.params;
+  const { userBio } = req.body;
+
+  try {
+    
+    const user = await Post.findOneAndUpdate({ userId: userId }, { userBio }, { new: true });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    res.json(user);
+  } catch (error) {
+    console.error('Error updating user bio:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
+router.patch('/user/:userId/emotion', async (req, res) => {
+  const { userId } = req.params;
+  const { userEmotion } = req.body;
+
+  try {
+    const user = await Post.findOneAndUpdate({ userId: userId }, { userEmotion }, { new: true });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    res.json(user);
+  } catch (error) {
+    console.error('Error updating user emotion:', error);
     res.status(500).json({ message: 'Internal Server Error' });
   }
 });
