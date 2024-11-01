@@ -2,11 +2,11 @@ const express = require('express');
 const router = express.Router();
 const Post = require('../models/Posts');
 const Bookmark=require('../models/Bookmark')
+const User=require('../models/User')
 const multer = require('multer');
 const fs=require('fs')
 const Redis=require('ioredis')
 const cloudinary = require('../cloudinaryconfig')
-const mongoose=require('mongoose')
 require('dotenv').config();
 
 
@@ -62,7 +62,7 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
         createdAt: new Date(),
         tags:tagsArray
       });
-
+      
       await newPost.save();
       await redisclient.del("posts");
       await redisclient.del(`posts:0:3`); 
@@ -325,13 +325,35 @@ router.get('/users/:userId/bookmarks', async (req, res) => {
   }
 });
 
+router.post('/user/register', async (req, res) => {
+  const { userId, username } = req.body;
+
+  try {
+    const existingUser = await User.findOne({ userId });
+    if (existingUser) {
+      return res.status(400).json({ message: 'User already exists.' });
+    }
+    const newUser = new User({
+      userId,
+      username,
+    });
+
+    await newUser.save();
+    res.status(201).json({ message: 'User registered successfully.', user: newUser });
+  } catch (error) {
+    console.error('Error registering user:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
+
 router.patch('/user/:userId/bio', async (req, res) => {
   const { userId } = req.params;
   const { userBio } = req.body;
 
   try {
     
-    const user = await Post.findOneAndUpdate({ userId: userId }, { userBio }, { new: true });
+    const user = await User.findOneAndUpdate({ userId: userId }, { userBio }, { new: true });
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -341,13 +363,27 @@ router.patch('/user/:userId/bio', async (req, res) => {
     res.status(500).json({ message: 'Internal Server Error' });
   }
 });
+router.get('/user/:userId', async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const user = await User.findOne({ userId });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+    res.json({ user });
+  } catch (error) {
+    console.error('Error fetching user:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
 
 router.patch('/user/:userId/emotion', async (req, res) => {
   const { userId } = req.params;
   const { userEmotion } = req.body;
 
   try {
-    const user = await Post.findOneAndUpdate({ userId: userId }, { userEmotion }, { new: true });
+    const user = await User.findOneAndUpdate({ userId: userId }, { userEmotion }, { new: true });
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
