@@ -170,13 +170,23 @@ router.get('/posts/:id', async (req, res) => {
 
     if (cachedPost) {
       console.log("Fetching post from Redis cache...");
+      const post = JSON.parse(cachedPost);
+      await Post.findByIdAndUpdate(req.params.id, { $inc: { pageviews: 1 } });
+      post.pageviews += 1;
+      await redisclient.set(cacheKey, JSON.stringify(post), 'EX', 86400);
       return res.json(JSON.parse(cachedPost));
     }
 
-    const post = await Post.findById(req.params.id);
+    const post = await Post.findByIdAndUpdate(
+      req.params.id,
+      { $inc: { pageviews: 1 } },
+      { new: true }
+    );
+
+    // const post = await Post.findById(req.params.id);
     if (!post) return res.status(404).json({ message: 'Post not found' });
 
-    // Cache the post
+    // cache the post
     await redisclient.set(cacheKey, JSON.stringify(post),'EX', 86400);
     res.json(post);
   } catch (error) {
@@ -363,6 +373,7 @@ router.patch('/user/:userId/bio', async (req, res) => {
     res.status(500).json({ message: 'Internal Server Error' });
   }
 });
+
 router.get('/user/:userId', async (req, res) => {
   const { userId } = req.params;
 
@@ -377,6 +388,16 @@ router.get('/user/:userId', async (req, res) => {
     res.status(500).json({ message: 'Internal Server Error' });
   }
 });
+router.get('/users/biodata', async (req, res) => {
+  try {
+    const user = await User.find();
+    res.json(user);
+  } catch (error) {
+    console.error('Error fetching user:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
 
 router.patch('/user/:userId/emotion', async (req, res) => {
   const { userId } = req.params;
@@ -393,7 +414,6 @@ router.patch('/user/:userId/emotion', async (req, res) => {
     res.status(500).json({ message: 'Internal Server Error' });
   }
 });
-
 
 
 

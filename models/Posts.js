@@ -11,6 +11,7 @@ const PostSchema = new mongoose.Schema({
   userId: { type:String , require: true },
   username: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },
+  pageviews: { type: Number, default: 0 },
   tags: {type: [String],default:[]}
 });
 
