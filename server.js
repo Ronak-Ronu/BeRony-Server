@@ -14,7 +14,12 @@ const postRoutes = require('./routes/postRoutes');
 const draftRoutes = require('./routes/draftRoutes');
 
 const app = express();
-app.use(cors());
+app.use(cors(
+  {
+    origin: "*", 
+    methods: ["GET", "POST"]
+  }
+));
 
 app.use(bodyParser.json());
 app.use(express.json());
@@ -89,12 +94,12 @@ function keepAlive() {
 }
 
 const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-  keepAlive()
-});
+// app.listen(port, () => {
+//   console.log(`Server running on port ${port}`);
+//   keepAlive()
+// });
 
-server.listen(3001, () => {
-  console.log(`ws  running on port ${3001}`);
+server.listen(port, () => {
+  console.log(`ws  running on port ${port}`);
   keepAlive()
 });
