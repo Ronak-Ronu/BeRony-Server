@@ -12,7 +12,8 @@ const PostSchema = new mongoose.Schema({
   username: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },
   pageviews: { type: Number, default: 0 },
-  tags: {type: [String],default:[]}
+  tags: {type: [String],default:[]},
+  collaborators: [{ type: String }]
 });
 
 

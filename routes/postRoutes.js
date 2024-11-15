@@ -119,6 +119,7 @@ router.get('/posts', async (req, res) => {
         // Cache the posts in Redis
         await redisclient.setex("posts", 3600, JSON.stringify(posts));      
       }
+
 // console.log(totalPosts);
     res.json(posts);
 
@@ -194,6 +195,8 @@ router.get('/posts/:id', async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 });
+
+
 
 router.get('/user/:username/posts',async (req,res)=>{
   const { username } = req.params;
@@ -412,6 +415,38 @@ router.patch('/user/:userId/emotion', async (req, res) => {
   } catch (error) {
     console.error('Error updating user emotion:', error);
     res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
+router.get('/search', async (req, res) => {
+  const { query } = req.query;
+  try {
+    const users = await User.find({ username: { $regex: query, $options: 'i' } });
+    res.status(200).json(users);
+  } catch (error) {
+    res.status(500).json({ message: 'No user found', error });
+  }
+});
+
+
+
+router.post('/:postId/add-collaborator', async (req, res) => {
+  const { postId } = req.params;
+  const { collaboratorId } = req.body; 
+  try {
+    const post = await Post.findById(postId);
+    
+    if (!post) return res.status(404).json({ message: 'Post not found' });
+    
+    if (!post.collaborators.includes(collaboratorId)) {
+      post.collaborators.push(collaboratorId);
+      await post.save();
+      res.status(200).json({ message: 'Collaborator added successfully' });
+    } else {
+      res.status(400).json({ message: 'User is already a collaborator' });
+    }
+  } catch (error) {
+    res.status(500).json({ message: 'Error adding collaborator', error });
   }
 });
 

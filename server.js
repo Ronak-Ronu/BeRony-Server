@@ -7,19 +7,14 @@ const axios = require('axios');
 const http = require("http");
 const Redis=require('ioredis')
 const socketIo = require("socket.io");
-
-
-
 const postRoutes = require('./routes/postRoutes');
 const draftRoutes = require('./routes/draftRoutes');
-
+const Post = require('./models/Posts');
 const app = express();
-app.use(cors(
-  {
-    origin: "*", 
-    methods: ["GET", "POST"]
-  }
-));
+app.use(cors({
+  origin: "*",  
+  methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"], 
+}));
 
 app.use(bodyParser.json());
 app.use(express.json());
@@ -28,9 +23,12 @@ const server = http.createServer(app)
 const io = socketIo(server, {
   cors: {
     origin: "*", 
-    methods: ["GET", "POST"]
+    methods: ["GET", "POST"],
+    allowedHeaders: ["Authorization"],
+    credentials: true
   }
 });
+
 const channel = "textChannel";
 
 
@@ -53,25 +51,75 @@ mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopol
     port: process.env.REDIS_PORT
   });
 
-redisSubscriber.subscribe(channel);
-redisSubscriber.on("message", (channel, message) => {
-    io.emit("textChange", message);  
+  redisSubscriber.subscribe(channel);
+  redisSubscriber.on("message", (channel, message) => {
+      const { postId, text } = JSON.parse(message);
+      io.to(postId).emit("textChange", text);
   });
-
-io.on("connection", (socket) => {
-    console.log("User connected:", socket.id);
-    socket.on("textChange", (text) => {
-     
-      redisPublisher.publish(channel, text);
-    });
   
 
-    socket.on("disconnect", () => {
-      console.log("User disconnected:", socket.id);
-    });
+  io.use(async (socket, next) => {
+    const { userId, postId } = socket.handshake.auth;
+  
+    try {
+      const post = await Post.findById(postId);
+      if (!post) {
+        return next(new Error("Post not found"));
+      }
+  
+      const isAuthorized = post.userId === userId || post.collaborators.includes(userId);
+      if (!isAuthorized) {
+        return next(new Error("Not authorized to edit this post"));
+      }
+        socket.userId = userId;
+      socket.postId = postId;
+      next();
+    } catch (err) {
+      console.log("Authorization error:", err);  
+      next(new Error("Authorization error"));
+    }
   });
-    
+  
+io.on("connection", (socket) => {
+    console.log("User connected:", socket.userId, "for post:", socket.postId);
 
+    socket.join(socket.postId); 
+  socket.on("textChange",(text)=>{
+    socket.to(socket.postId).emit("textChange", text);
+
+  })
+  socket.on("saveChanges", async (text) => {
+    try {
+      const post = await Post.findById(socket.postId);
+      if (!post) {
+        return console.error("Post not found");
+      }
+      
+      // Update the post content
+      post.bodyofcontent = text;
+      await post.save();  
+  
+      console.log("Post updated with new text:", text);
+  
+      // Update Redis cache with the latest post data
+      const cacheKey = `post:${socket.postId}`;
+      await redisPublisher.set(cacheKey, JSON.stringify(post), 'EX', 86400); // Cache expiration of 1 day
+  
+      // Notify all clients about the change
+      socket.to(socket.postId).emit("textChange", text);
+  
+      // Publish the updated content to Redis for subscribers
+      redisPublisher.publish(channel, JSON.stringify({ postId: socket.postId, text }));
+    } catch (error) {
+      console.error("Error updating post:", error);
+    }
+  });
+  
+    socket.on("disconnect", () => {
+        console.log("User disconnected:", socket.userId);
+    });
+});
+   
 
 
 app.use('/api', postRoutes);
