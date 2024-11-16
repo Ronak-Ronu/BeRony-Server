@@ -7,7 +7,9 @@ const multer = require('multer');
 const fs=require('fs')
 const Redis=require('ioredis')
 const cloudinary = require('../cloudinaryconfig')
+const nodemailer = require('nodemailer');
 require('dotenv').config();
+
 
 
 const upload = multer({
@@ -470,6 +472,41 @@ router.post('/:postId/add-collaborator', async (req, res) => {
   }
 });
 
+
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+router.post('/send-collab-invite', async (req, res) => {
+  const { userEmail, authorMail,authorName, postTitle, postDescription, workspaceLink } = req.body;
+
+  const mailOptions = {
+    from:process.env.EMAIL_USER,
+    to: userEmail,
+    subject: `You've been added as a collaborator!`,
+    html: `
+      <h1>Hello!</h1>
+      <p>You have been added as a collaborator to the following post:</p>
+      <h2>Post Title: ${postTitle} - ${authorName}</h2>
+      <p>Author Mail ID: ${authorMail}</p>
+      <p>${postDescription}</p>
+      <p>To start contributing, click the link below to access the workspace:</p>
+      <p><a href="${workspaceLink}">Go to Workspace</a></p>
+      <p>Happy contributing!</p>
+    `
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    res.status(200).json({ message: 'Invitation sent Successfully' });
+  } catch (error) {
+    console.error('Error sending email:', error);
+    res.status(500).json({ message: 'Error sending email' });
+  }
+});
 
 
 module.exports = router;
