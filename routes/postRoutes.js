@@ -339,7 +339,7 @@ router.get('/users/:userId/bookmarks', async (req, res) => {
 });
 
 router.post('/user/register', async (req, res) => {
-  const { userId, username } = req.body;
+  const { userId, username,userEmail } = req.body;
 
   try {
     const existingUser = await User.findOne({ userId });
@@ -349,8 +349,10 @@ router.post('/user/register', async (req, res) => {
     const newUser = new User({
       userId,
       username,
+      userEmail
     });
-
+    console.log(newUser);
+    
     await newUser.save();
     res.status(201).json({ message: 'User registered successfully.', user: newUser });
   } catch (error) {
@@ -376,6 +378,24 @@ router.patch('/user/:userId/bio', async (req, res) => {
     res.status(500).json({ message: 'Internal Server Error' });
   }
 });
+
+router.patch('/user/:userId/email', async (req, res) => {
+  const { userId } = req.params;
+  const { userEmail } = req.body;
+
+  try {
+    
+    const user = await User.findOneAndUpdate({ userId: userId }, { userEmail }, { new: true });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    res.json(user);
+  } catch (error) {
+    console.error('Error updating user email:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
 
 router.get('/user/:userId', async (req, res) => {
   const { userId } = req.params;
@@ -446,7 +466,7 @@ router.post('/:postId/add-collaborator', async (req, res) => {
       res.status(400).json({ message: 'User is already a collaborator' });
     }
   } catch (error) {
-    res.status(500).json({ message: 'Error adding collaborator', error });
+    res.status(500).json({ message: '', error });
   }
 });
 
