@@ -82,11 +82,9 @@ mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopol
   
 io.on("connection", (socket) => {
     console.log("User connected:", socket.userId, "for post:", socket.postId);
-
     socket.join(socket.postId); 
   socket.on("textChange",(text)=>{
     socket.to(socket.postId).emit("textChange", text);
-
   })
   socket.on("saveChanges", async (text) => {
     try {

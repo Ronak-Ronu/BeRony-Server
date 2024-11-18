@@ -14,9 +14,9 @@ require('dotenv').config();
 
 const upload = multer({
   dest: 'uploads/',
-  limits: { fileSize: 15 * 1024 * 1024 }, // 10 MB limit
+  limits: { fileSize: 20 * 1024 * 1024 }, // 10 MB limit
   fileFilter(req, file, cb) {
-    if (!file.originalname.match(/\.(jpg|jpeg|png|svg|gif)$/)) {
+    if (!file.originalname.match(/\.(jpg|jpeg|png|svg|gif|mp4|mpeg)$/)) {
       return cb(new Error('Please upload an image'));
     }
     cb(null, true);
@@ -47,18 +47,29 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
     const filePath = req.file.path;
     console.log('File path:', filePath);
     const tagsArray = JSON.parse(req.body.tags);
+    const isVideo = req.file.mimetype.startsWith('video') || req.file.originalname.endsWith('.mp4')   ;
+    const folderName = isVideo ? 'BlogData' : 'VBlogData';
 
       if (req.file) {
       const resultimageurl = await cloudinary.uploader.upload(req.file.path, {
-        folder: 'BlogData',
+        folder: folderName,
+        resource_type: isVideo ? 'video' : 'image',
       });
-      const newresultimageurl=`https://res.cloudinary.com/beronyimages/image/upload/${resultimageurl.public_id}`
+      let newresultimageurl='';
+      if (isVideo) {
+        // For video, you need to use Cloudinary's video URL format
+         newresultimageurl = `https://res.cloudinary.com/${process.env.CLOUD_NAME}/video/upload/${resultimageurl.public_id}.mp4`;
+      } else {
+        // For image, use the standard image URL
+        newresultimageurl = `https://res.cloudinary.com/${process.env.CLOUD_NAME}/image/upload/${resultimageurl.public_id}`;
+      }
 
       const newPost = new Post({
         title: req.body.title,
         bodyofcontent: req.body.bodyofcontent,
         endnotecontent: req.body.endnotecontent,
-        imageUrl: newresultimageurl,
+        imageUrl: isVideo ? null : newresultimageurl,
+        videoUrl: isVideo ? newresultimageurl : null,
         userId: req.body.userId,
         username: req.body.username,
         createdAt: new Date(),
