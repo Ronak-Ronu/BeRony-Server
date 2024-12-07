@@ -57,10 +57,8 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
       });
       let newresultimageurl='';
       if (isVideo) {
-        // For video, you need to use Cloudinary's video URL format
          newresultimageurl = `https://res.cloudinary.com/${process.env.CLOUD_NAME}/video/upload/${resultimageurl.public_id}.mp4`;
       } else {
-        // For image, use the standard image URL
         newresultimageurl = `https://res.cloudinary.com/${process.env.CLOUD_NAME}/image/upload/${resultimageurl.public_id}`;
       }
 

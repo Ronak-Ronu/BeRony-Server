@@ -14,7 +14,9 @@ const PostSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
   pageviews: { type: Number, default: 0 },
   tags: {type: [String],default:[]},
-  collaborators: [{ type: String }]
+  collaborators: [{ type: String }],
+  // postScheduleTime: { type: Date, default: Date.now },
+  // status: { type: String, default: 'scheduled' },
 });
 
 

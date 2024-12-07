@@ -39,19 +39,20 @@ mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopol
   .catch((err) => console.log(err));
 
 
-  const redisSubscriber = new Redis({
+const redisSubscriber = new Redis({
     host: process.env.REDIS_HOST,
     password: process.env.REDIS_PASSWORD,
     port: process.env.REDIS_PORT
   });
   
-  const redisPublisher = new Redis({
+const redisPublisher = new Redis({
     host: process.env.REDIS_HOST,
     password: process.env.REDIS_PASSWORD,
     port: process.env.REDIS_PORT
   });
 
   redisSubscriber.subscribe(channel);
+
   redisSubscriber.on("message", (channel, message) => {
       const { postId, text } = JSON.parse(message);
       io.to(postId).emit("textChange", text);
@@ -59,7 +60,7 @@ mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopol
   
 
   io.use(async (socket, next) => {
-    const { userId, postId } = socket.handshake.auth;
+    const { userId, postId,username } = socket.handshake.auth;
   
     try {
       const post = await Post.findById(postId);
@@ -72,7 +73,10 @@ mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopol
         return next(new Error("Not authorized to edit this post"));
       }
         socket.userId = userId;
-      socket.postId = postId;
+        socket.postId = postId;
+        socket.username = username;
+        console.log(socket.username);
+        
       next();
     } catch (err) {
       console.log("Authorization error:", err);  
@@ -81,40 +85,51 @@ mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopol
   });
   
 io.on("connection", (socket) => {
-    console.log("User connected:", socket.userId, "for post:", socket.postId);
+    console.log("User connected:", socket.username, "for post:", socket.postId);
     socket.join(socket.postId); 
-  socket.on("textChange",(text)=>{
-    socket.to(socket.postId).emit("textChange", text);
-  })
-  socket.on("saveChanges", async (text) => {
-    try {
-      const post = await Post.findById(socket.postId);
-      if (!post) {
-        return console.error("Post not found");
-      }
       
-      // Update the post content
-      post.bodyofcontent = text;
-      await post.save();  
-  
-      console.log("Post updated with new text:", text);
-  
-      // Update Redis cache with the latest post data
-      const cacheKey = `post:${socket.postId}`;
-      await redisPublisher.set(cacheKey, JSON.stringify(post), 'EX', 86400); // Cache expiration of 1 day
-  
-      // Notify all clients about the change
+    socket.on("textChange",(text)=>{
       socket.to(socket.postId).emit("textChange", text);
-  
-      // Publish the updated content to Redis for subscribers
-      redisPublisher.publish(channel, JSON.stringify({ postId: socket.postId, text }));
-    } catch (error) {
-      console.error("Error updating post:", error);
-    }
-  });
-  
+    })
+
+    socket.on("startEditing", () => {
+      io.to(socket.postId).emit("startEditing", socket.username);
+    });
+
+
+
+    socket.on("saveChanges", async (text) => {
+      try {
+        const post = await Post.findById(socket.postId);
+        if (!post) {
+          return console.error("Post not found");
+        }
+        
+        // Update the post content
+        post.bodyofcontent = text;
+        await post.save();  
+    
+        console.log("Post updated with new text:", text);
+    
+        // Update Redis cache with the latest post data
+        const cacheKey = `post:${socket.postId}`;
+        await redisPublisher.set(cacheKey, JSON.stringify(post), 'EX', 86400); // Cache expiration of 1 day
+    
+        // Notify all clients about the change
+        socket.to(socket.postId).emit("textChange", text);
+        socket.to(socket.postId).emit("users", socket.username);
+
+    
+        // Publish the updated content to Redis for subscribers
+        redisPublisher.publish(channel, JSON.stringify({ postId: socket.postId, text }));
+      } catch (error) {
+        console.error("Error updating post:", error);
+      }
+    });
+    
     socket.on("disconnect", () => {
         console.log("User disconnected:", socket.userId);
+
     });
 });
    
