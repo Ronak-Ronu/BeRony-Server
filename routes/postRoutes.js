@@ -496,16 +496,136 @@ router.post('/send-collab-invite', async (req, res) => {
     from:process.env.EMAIL_USER,
     to: userEmail,
     subject: `You've been added as a collaborator!`,
-    html: `
-      <h1>Hello!</h1>
-      <p>You have been added as a collaborator to the following post:</p>
-      <h2>Post Title: ${postTitle} - ${authorName}</h2>
-      <p>Author Mail ID: ${authorMail}</p>
-      <p>${postDescription}</p>
-      <p>To start contributing, click the link below to access the workspace:</p>
-      <p><a href="${workspaceLink}">Go to Workspace</a></p>
-      <p>Happy contributing!</p>
-    `
+    html: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Collaboration Invitation</title>
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f7f7f7;
+      color: #333;
+    }
+    .container {
+      max-width: 600px;
+      margin: 40px auto;
+      background-color: #ffffff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+    }
+    .header {
+      background-color: #c6caf9;
+      padding: 20px;
+      text-align: center;
+      color: #fff;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 24px;
+    }
+    .content {
+      padding: 20px;
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 15px;
+    }
+    .column {
+      width: 48%;
+    }
+    .column h3 {
+      margin-bottom: 5px;
+      font-size: 16px;
+      color: #666;
+    }
+    .column p {
+      margin: 0;
+      font-size: 14px;
+      color: #333;
+    }
+    .cta {
+      text-align: center;
+      margin: 20px 0;
+    }
+    .cta a {
+      display: inline-block;
+      padding: 12px 20px;
+      font-size: 16px;
+      color: #fff;
+      background-color: #c6caf9;
+      text-decoration: none;
+      border-radius: 25px;
+    }
+    .cta a:hover {
+      background-color: #a9add9;
+    }
+    .footer {
+      text-align: center;
+      font-size: 12px;
+      color: #999;
+      background-color: #f7f7f7;
+      padding: 10px 20px;
+    }
+    .footer a {
+      color: #c6caf9;
+      text-decoration: none;
+    }
+     .info-section {
+      background-color: #f2f3fc;
+      padding: 15px;
+      border: 1px solid #e2e5f7;
+      border-radius: 8px;
+      margin: 20px 0;
+      text-align: center;
+      font-size: 14px;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Collaboration Invitation</h1>
+    </div>
+    <div class="content">
+      <p>Hi <strong>${userEmail}</strong>,</p>
+      <p>You’ve been invited by <strong>${authorName}</strong> to collaborate on an exciting new blog post!</p>
+
+      <div class="row">
+        <div class="column">
+          <h3>Post Title</h3>
+          <p>${postTitle}</p>
+        </div>
+        <div class="column">
+          <h3>Author Email</h3>
+          <p>${authorMail}</p>
+        </div>
+      </div>
+
+          <h3>Post Description</h3>
+          <p>${postDescription}</p>
+      <div class="cta">
+        <a href="${workspaceLink}">Join the Workspace</a>
+      </div>
+    </div>
+
+    <div class="info-section">
+    <p>Manually access the link: <strong>${workspaceLink}</strong></p>
+  </div>
+    <div class="footer">
+      <p>If you did not expect this invitation, feel free to ignore it or <a href="mailto:${authorMail}">contact the author</a>.</p>
+    </div>
+  </div>
+</body>
+</html>
+
+  `
   };
 
   try {
