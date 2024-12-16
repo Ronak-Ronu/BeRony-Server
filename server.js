@@ -10,22 +10,40 @@ const socketIo = require("socket.io");
 const postRoutes = require('./routes/postRoutes');
 const draftRoutes = require('./routes/draftRoutes');
 const Post = require('./models/Posts');
+const helmet = require('helmet');
+
 const app = express();
 app.use(cors({
-  origin: "*",  
+  origin:  "*",  
   methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"], 
+  credentials: true,
+
 }));
 
 app.use(bodyParser.json());
 app.use(express.json());
+app.use(helmet());
+
+app.use((req, res, next) => {
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self';");
+  
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  
+  next();
+});
 
 const server = http.createServer(app)
 const io = socketIo(server, {
   cors: {
-    origin: "*", 
+    origin: process.env.BE_RONY_WEB_APP, 
     methods: ["GET", "POST"],
-    allowedHeaders: ["Authorization"],
-    credentials: true
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+    
   }
 });
 
