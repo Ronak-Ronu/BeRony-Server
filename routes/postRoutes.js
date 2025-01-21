@@ -340,7 +340,7 @@ router.get('/users/:userId/bookmarks', async (req, res) => {
   const { userId } = req.params;
 
   try {
-    // Find bookmarks for the user and populate the post data
+    // finding bookmarks for the user and populate the post data
     const bookmarks = await Bookmark.find({ userId }).populate('postId');
     res.json(bookmarks.map(bookmark => bookmark.postId));
   } catch (error) {
@@ -636,6 +636,81 @@ router.post('/send-collab-invite', async (req, res) => {
     res.status(500).json({ message: 'Error sending email' });
   }
 });
+
+router.post('/:currentuserid/:method/:userid', async (req, res) => {
+  const { currentuserid,method, userid } = req.params;
+  
+  if(method==='Follow')
+    {
+      try {
+ 
+        if (currentuserid === userid) {
+          return res.status(400).json({ message: "You cannot follow yourself." });
+        }
+        const userToFollow = await User.findOne({userId: userid});
+        const loggedInUser = await User.findOne({userId:currentuserid});
+
+    
+        // Check if both users exist
+        if (!userToFollow || !loggedInUser) {
+          return res.status(404).json({ message: "User not found." });
+        }
+    
+        loggedInUser.following = loggedInUser.following || [];
+        userToFollow.followers = userToFollow.followers || [];
+    
+        if (loggedInUser.following.includes(userid)) {
+          return res.status(400).json({ message: "Already Following." });
+        }
+    
+        loggedInUser.following.push(userid);
+        userToFollow.followers.push(currentuserid);
+    
+        await loggedInUser.save();
+        await userToFollow.save();
+    
+        res.status(200).json({ message: "Following" });
+      } catch (error) {
+        console.error("Error following user:", error);
+        res.status(500).json({ message: error.message });
+      }
+    }
+    if(method==='Unfollow')
+    {
+      try {    
+    
+        const userToUnFollow = await User.findOne({userId: userid});
+        const loggedInUser = await User.findOne({userId:currentuserid});
+    
+        // Check if both users exist
+        if (!userToUnFollow || !loggedInUser) {
+          return res.status(404).json({ message: "User not found." });
+        }
+    
+        loggedInUser.following = loggedInUser.following || [];
+        userToUnFollow.followers = userToUnFollow.followers || [];
+        
+        loggedInUser.following.pull(userid);
+        userToUnFollow.followers.pull(currentuserid);
+
+      
+    
+        await loggedInUser.save();
+        await userToUnFollow.save();
+    
+        res.status(200).json({ message: "Unfollowed" });
+
+
+      } catch (error) {
+        console.error("Error unfollowing user:", error);
+        res.status(500).json({ message: error.message });
+      }
+    }
+
+}
+);
+
+
 
 
 module.exports = router;

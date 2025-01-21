@@ -4,8 +4,10 @@ const UserSchema = new mongoose.Schema({
   userId: { type: String, required: true, unique: true },
   username: { type: String, required: true, unique: true },
   userEmail: { type: String, required: true,unique: true},
-  userBio: { type: String, default: '' }, // User bio
-  userEmotion: { type: String, default: '' }, // User emotion
+  userBio: { type: String, default: '' },
+  userEmotion: { type: String, default: '' }, 
+  followers: { type: [String], default: [] }, 
+  following: { type: [String], default: [] }, 
   createdAt: { type: Date, default: Date.now }
 });
 
