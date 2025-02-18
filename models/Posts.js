@@ -15,8 +15,8 @@ const PostSchema = new mongoose.Schema({
   pageviews: { type: Number, default: 0 },
   tags: {type: [String],default:[]},
   collaborators: [{ type: String }],
-  // postScheduleTime: { type: Date, default: Date.now },
-  // status: { type: String, default: 'scheduled' },
+  postScheduleTime: { type: Date, default: Date.now },
+  status: { type: String,enum: ['draft','scheduled','published'],  default: 'draft' },
 });
 
 

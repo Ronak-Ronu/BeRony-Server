@@ -11,6 +11,7 @@ const postRoutes = require('./routes/postRoutes');
 const draftRoutes = require('./routes/draftRoutes');
 const Post = require('./models/Posts');
 const helmet = require('helmet');
+const askronyai = require('./routes/askronyai')
 
 const app = express();
 app.use(cors({
@@ -154,6 +155,7 @@ io.on("connection", (socket) => {
 
 
 app.use('/api', postRoutes);
+app.use('/api', askronyai);
 app.use('/api', draftRoutes);
 
 

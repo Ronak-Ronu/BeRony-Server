@@ -9,12 +9,12 @@ const Redis=require('ioredis')
 const cloudinary = require('../cloudinaryconfig')
 const nodemailer = require('nodemailer');
 require('dotenv').config();
-
+const cron = require('node-cron');
 
 
 const upload = multer({
   dest: 'uploads/',
-  limits: { fileSize: 20 * 1024 * 1024 }, // 10 MB limit
+  limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter(req, file, cb) {
     if (!file.originalname.match(/\.(jpg|jpeg|png|svg|gif|mp4|mpeg)$/)) {
       return cb(new Error('Please upload an image'));
@@ -36,6 +36,28 @@ redisclient.on('connect',()=>{
 redisclient.on('error', (err) => {
   console.error('Redis error:', err);
 });
+
+
+const schedulePostPublishing = (postId, scheduleTime) => {
+  const delay = new Date(scheduleTime) - new Date();
+
+  if (delay > 0) {
+    console.log(`Post ${postId} scheduled in ${delay / 1000} seconds`);
+    setTimeout(async () => {
+      try {
+        const post = await Post.findByIdAndUpdate(postId, { status: 'published' }, { new: true });
+        console.log(`Post ${postId} published!`);
+        
+        // Clear Redis cache for updated posts
+        await redisclient.del("posts");
+        await redisclient.del(`posts:0:3`);
+        await redisclient.del(`posts:3:3`);
+      } catch (error) {
+        console.error(`Error publishing post ${postId}:`, error);
+      }
+    }, delay);
+  }
+};
 
 
 router.post('/posts', upload.single('imageUrl'), async (req, res) => {
@@ -62,6 +84,10 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
         newresultimageurl = `https://res.cloudinary.com/${process.env.CLOUD_NAME}/image/upload/${resultimageurl.public_id}`;
       }
 
+
+      const postScheduleTime = req.body.postScheduleTime? new Date(req.body.postScheduleTime):null;
+      const isSchedule = postScheduleTime && postScheduleTime > new Date()
+
       const newPost = new Post({
         title: req.body.title,
         bodyofcontent: req.body.bodyofcontent,
@@ -71,7 +97,9 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
         userId: req.body.userId,
         username: req.body.username,
         createdAt: new Date(),
-        tags:tagsArray
+        tags:tagsArray,
+        postScheduleTime,
+        status: isSchedule ? 'scheduled' : 'published',
       });
       
       await newPost.save();
@@ -82,6 +110,9 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
 
       console.log(newPost);
 
+      if (isSchedule) {
+        schedulePostPublishing(newPost._id, postScheduleTime);
+      }
 
       fs.unlink(req.file.path, (err) => {
         if (err) {
