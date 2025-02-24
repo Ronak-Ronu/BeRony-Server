@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Post = require('../models/Posts');
 const Bookmark=require('../models/Bookmark')
+const Tree = require('../models/Tree')
 const User=require('../models/User')
 const multer = require('multer');
 const fs=require('fs')
@@ -802,6 +803,40 @@ router.get('/sitemap.xml',async (req,res)=>{
     
   }
 })
+router.get("/tree", async (req, res) => {
+  try {
+    const trees = await Tree.find();
+    res.json(trees);
+  } catch (error) {
+    res.status(500).json({ message: "Error fetching trees" });
+  }
+});
+
+// ✅ Add a Tree (Only If User Exists and Hasn't Planted One)
+router.post("/tree", async (req, res) => {
+  const { userId, position, woodColor, leafColor } = req.body;
+
+  try {
+    const user = await User.findOne({ userId });
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const existingTree = await Tree.findOne({ userId });
+    if (existingTree) return res.status(400).json({ message: "User already planted a tree" });
+
+    const newTree = new Tree({
+      userId,
+      username: user.username,
+      position,
+      woodColor,
+      leafColor,
+    });
+
+    await newTree.save();
+    res.status(201).json(newTree);
+  } catch (error) {
+    res.status(500).json({ message: "Error saving tree" });
+  }
+});
 
 
 

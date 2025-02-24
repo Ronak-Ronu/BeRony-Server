@@ -15,7 +15,7 @@ const askronyai = require('./routes/askronyai')
 
 const app = express();
 app.use(cors({
-  origin:  process.env.BE_RONY_WEB_APP,  
+  origin:  [process.env.BE_RONY_WEB_APP,process.env.BE_RONY_USER_ADD_TREE],  
   methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"], 
   credentials: true,
 
