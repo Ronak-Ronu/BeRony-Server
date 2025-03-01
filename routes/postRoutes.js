@@ -803,6 +803,7 @@ router.get('/sitemap.xml',async (req,res)=>{
     
   }
 })
+
 router.get("/tree", async (req, res) => {
   try {
     const trees = await Tree.find();
@@ -812,19 +813,20 @@ router.get("/tree", async (req, res) => {
   }
 });
 
-// ✅ Add a Tree (Only If User Exists and Hasn't Planted One)
 router.post("/tree", async (req, res) => {
+  // console.log("Received body:", req.body); // Debugging Log
   const { userId, position, woodColor, leafColor } = req.body;
 
   try {
-    const user = await User.findOne({ userId });
+    const user = await User.findOne({userId})
+    // console.log(user);
     if (!user) return res.status(404).json({ message: "User not found" });
-
+    
     const existingTree = await Tree.findOne({ userId });
     if (existingTree) return res.status(400).json({ message: "User already planted a tree" });
 
     const newTree = new Tree({
-      userId,
+      userId: user.userId,
       username: user.username,
       position,
       woodColor,
