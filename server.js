@@ -167,7 +167,7 @@ function sendRequest() {
 }
 
 function keepAlive() {
-  setInterval(sendRequest, 2*1000);
+  setInterval(sendRequest, 20*60);
 }
 
 const port = process.env.PORT || 3000;
