@@ -15,7 +15,7 @@ const askronyai = require('./routes/askronyai')
 
 const app = express();
 app.use(cors({
-  origin:  [process.env.BE_RONY_WEB_APP,process.env.BE_RONY_USER_ADD_TREE],  
+  origin:  "*",  
   methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"], 
   credentials: true,
 }));
@@ -167,7 +167,7 @@ function sendRequest() {
 }
 
 function keepAlive() {
-  setInterval(sendRequest, 20*60);
+  setInterval(sendRequest, 20*60*1000);
 }
 
 const port = process.env.PORT || 3000;
