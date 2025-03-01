@@ -18,7 +18,6 @@ app.use(cors({
   origin:  [process.env.BE_RONY_WEB_APP,process.env.BE_RONY_USER_ADD_TREE],  
   methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"], 
   credentials: true,
-
 }));
 
 app.use(bodyParser.json());
@@ -124,13 +123,11 @@ io.on("connection", (socket) => {
           return console.error("Post not found");
         }
         
-        // Update the post content
         post.bodyofcontent = text;
         await post.save();  
     
         console.log("Post updated with new text:", text);
     
-        // Update Redis cache with the latest post data
         const cacheKey = `post:${socket.postId}`;
         await redisPublisher.set(cacheKey, JSON.stringify(post), 'EX', 86400); // Cache expiration of 1 day
     
@@ -139,7 +136,6 @@ io.on("connection", (socket) => {
         socket.to(socket.postId).emit("users", socket.username);
 
     
-        // Publish the updated content to Redis for subscribers
         redisPublisher.publish(channel, JSON.stringify({ postId: socket.postId, text }));
       } catch (error) {
         console.error("Error updating post:", error);
@@ -171,7 +167,7 @@ function sendRequest() {
 }
 
 function keepAlive() {
-  setInterval(sendRequest, 10*60*1000);
+  setInterval(sendRequest, 2*1000);
 }
 
 const port = process.env.PORT || 3000;
