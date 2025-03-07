@@ -829,8 +829,8 @@ router.post("/tree", async (req, res) => {
       userId: user.userId,
       username: user.username,
       position,
-      woodColor,
-      leafColor,
+      woodColor: woodColor || "#8B5A2B",
+      leafColor: leafColor || "#00FF00"
     });
 
     await newTree.save();
