@@ -814,7 +814,7 @@ router.get("/tree", async (req, res) => {
 });
 
 router.post("/tree", async (req, res) => {
-  // console.log("Received body:", req.body); // Debugging Log
+  // console.log("Received body:", req.body); 
   const { userId, position, woodColor, leafColor } = req.body;
 
   try {
@@ -840,6 +840,22 @@ router.post("/tree", async (req, res) => {
   }
 });
 
+
+router.delete('/tree/:id', async (req, res) => {
+  try {
+    const userId=req.params.id;
+
+    const deletedTree = await Tree.findOneAndDelete({userId:userId})
+    
+    if (!deletedTree) {
+      return res.status(404).json({ message: 'tree not found' });
+    }
+    res.json({ message: 'tree deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting post:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
 
 
 module.exports = router;

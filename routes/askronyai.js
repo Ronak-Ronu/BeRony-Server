@@ -8,7 +8,7 @@ require('dotenv').config();
 
 const chromaClient = new ChromaClient({ path: "http://localhost:8000" });
 const BERONY_POST_COLLECTION = 'BERONY_POST_V2';
-const CHUNK_SIZE = 512; // Optimal for all-MiniLM-L6-v2 model
+const CHUNK_SIZE = 512;
 const CHUNK_OVERLAP = 50;
 const embeddingCache = new Map();
 
