@@ -114,14 +114,21 @@ io.on("connection", (socket) => {
       io.to(socket.postId).emit("startEditing", socket.username);
     });
 
+    socket.on("canvasUpdate", (data) => {
+      socket.broadcast.emit("canvasUpdate", data); 
+    });
+    
+    
+
     socket.on('cursorMove', ({ position }) => {
+      console.log(`Received cursorMove from user ${socket.username} at position ${position}`); // Debugging log
       socket.to(socket.postId).emit('cursorUpdate', {
         userId: socket.userId,
         username: socket.username,
         position,
       });
     });
-
+    
 
     socket.on("saveChanges", async (text) => {
       try {
