@@ -39,7 +39,7 @@ app.use((req, res, next) => {
 const server = http.createServer(app)
 const io = socketIo(server, {
   cors: {
-    origin: process.env.BE_RONY_WEB_APP, 
+    origin: "*", 
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
@@ -92,7 +92,7 @@ const redisPublisher = new Redis({
       }
         socket.userId = userId;
         socket.postId = postId;
-        socket.username = username;
+        socket.username = username || "Guest";
         console.log(socket.username);
         
       next();
@@ -114,6 +114,13 @@ io.on("connection", (socket) => {
       io.to(socket.postId).emit("startEditing", socket.username);
     });
 
+    socket.on('cursorMove', ({ position }) => {
+      socket.to(socket.postId).emit('cursorUpdate', {
+        userId: socket.userId,
+        username: socket.username,
+        position,
+      });
+    });
 
 
     socket.on("saveChanges", async (text) => {
@@ -144,8 +151,9 @@ io.on("connection", (socket) => {
     
     socket.on("disconnect", () => {
         console.log("User disconnected:", socket.userId);
-
+        socket.to(socket.postId).emit('cursorRemove', { userId: socket.userId });
     });
+    
 });
    
 
