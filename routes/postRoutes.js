@@ -38,25 +38,46 @@ redisclient.on('error', (err) => {
   console.error('Redis error:', err);
 });
 
-
 const schedulePostPublishing = (postId, scheduleTime) => {
   const delay = new Date(scheduleTime) - new Date();
 
   if (delay > 0) {
     console.log(`Post ${postId} scheduled in ${delay / 1000} seconds`);
+
+    // Using setTimeout for immediate scheduling (optional, you can remove this if cron is sufficient)
     setTimeout(async () => {
       try {
         const post = await Post.findByIdAndUpdate(postId, { status: 'published' }, { new: true });
-        console.log(`Post ${postId} published!`);
-        
-        // Clear Redis cache for updated posts
+        console.log(`Post ${postId} published via setTimeout!`);
         await redisclient.del("posts");
         await redisclient.del(`posts:0:3`);
         await redisclient.del(`posts:3:3`);
       } catch (error) {
-        console.error(`Error publishing post ${postId}:`, error);
+        console.error(`Error publishing post ${postId} via setTimeout:`, error);
       }
     }, delay);
+
+    // Schedule with cron job
+    const cronTime = new Date(scheduleTime);
+    const cronExpression = `${cronTime.getSeconds()} ${cronTime.getMinutes()} ${cronTime.getHours()} ${cronTime.getDate()} ${cronTime.getMonth() + 1} *`;
+    
+    cron.schedule(cronExpression, async () => {
+      try {
+        const post = await Post.findById(postId);
+        if (post && post.status === 'scheduled') { // Ensure it hasn't been published already
+          await Post.findByIdAndUpdate(postId, { status: 'published' }, { new: true });
+          console.log(`Post ${postId} published via cron job!`);
+          await redisclient.del("posts");
+          await redisclient.del(`posts:0:3`);
+          await redisclient.del(`posts:3:3`);
+        }
+      } catch (error) {
+        console.error(`Error publishing post ${postId} via cron:`, error);
+      }
+    }, {
+      scheduled: true,
+      timezone: "UTC" // Adjust timezone as needed
+    });
   }
 };
 
@@ -126,8 +147,7 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
 
       res.json(newPost);
     } else {
-      // If no file is uploaded, return an error
-      return res.status(400).json({ message: 'Missing required parameter - file' });
+      return res.status(400).json({ message: 'file is missing' });
     }
   } catch (error) {
     console.error('Error during post creation:', error);
@@ -857,5 +877,18 @@ router.delete('/tree/:id', async (req, res) => {
   }
 });
 
+const initializeScheduledPosts = async () => {
+  try {
+    const scheduledPosts = await Post.find({ status: 'scheduled', postScheduleTime: { $gt: new Date() } });
+    scheduledPosts.forEach(post => {
+      schedulePostPublishing(post._id, post.postScheduleTime);
+    });
+    console.log(`Initialized ${scheduledPosts.length} scheduled posts`);
+  } catch (error) {
+    console.error('Error initializing scheduled posts:', error);
+  }
+};
+
+initializeScheduledPosts()
 
 module.exports = router;
