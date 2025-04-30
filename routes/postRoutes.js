@@ -10,7 +10,8 @@ const Redis=require('ioredis')
 const cloudinary = require('../cloudinaryconfig')
 const nodemailer = require('nodemailer');
 require('dotenv').config();
-const cron = require('node-cron');
+const postQueue = require('../queues/bullqueue');
+const { publishScheduledPost } = require('../worker/publishWorker');
 
 
 const upload = multer({
@@ -38,47 +39,27 @@ redisclient.on('error', (err) => {
   console.error('Redis error:', err);
 });
 
-const schedulePostPublishing = (postId, scheduleTime) => {
+const schedulePostPublishing = async (postId, scheduleTime) => {
   const delay = new Date(scheduleTime) - new Date();
 
-  if (delay > 0) {
-    console.log(`Post ${postId} scheduled in ${delay / 1000} seconds`);
-
-    // Using setTimeout for immediate scheduling (optional, you can remove this if cron is sufficient)
-    setTimeout(async () => {
-      try {
-        const post = await Post.findByIdAndUpdate(postId, { status: 'published' }, { new: true });
-        console.log(`Post ${postId} published via setTimeout!`);
-        await redisclient.del("posts");
-        await redisclient.del(`posts:0:3`);
-        await redisclient.del(`posts:3:3`);
-      } catch (error) {
-        console.error(`Error publishing post ${postId} via setTimeout:`, error);
-      }
-    }, delay);
-
-    // Schedule with cron job
-    const cronTime = new Date(scheduleTime);
-    const cronExpression = `${cronTime.getSeconds()} ${cronTime.getMinutes()} ${cronTime.getHours()} ${cronTime.getDate()} ${cronTime.getMonth() + 1} *`;
-    
-    cron.schedule(cronExpression, async () => {
-      try {
-        const post = await Post.findById(postId);
-        if (post && post.status === 'scheduled') { // Ensure it hasn't been published already
-          await Post.findByIdAndUpdate(postId, { status: 'published' }, { new: true });
-          console.log(`Post ${postId} published via cron job!`);
-          await redisclient.del("posts");
-          await redisclient.del(`posts:0:3`);
-          await redisclient.del(`posts:3:3`);
-        }
-      } catch (error) {
-        console.error(`Error publishing post ${postId} via cron:`, error);
-      }
-    }, {
-      scheduled: true,
-      timezone: "UTC" // Adjust timezone as needed
-    });
+  if (delay <= 0) {
+    await publishScheduledPost(postId);
+    return;
   }
+
+  await postQueue.add(
+    { postId },
+    {
+      delay,
+      attempts: 3,
+      backoff: {
+        type: 'exponential',
+        delay: 3000,
+      }
+    }
+  );
+
+  console.log(`Post ${postId} scheduled using Bull in ${delay / 1000} seconds.`);
 };
 
 
@@ -108,7 +89,7 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
 
 
       const postScheduleTime = req.body.postScheduleTime? new Date(req.body.postScheduleTime):null;
-      const isSchedule = postScheduleTime && postScheduleTime > new Date()
+      const isSchedule = postScheduleTime && postScheduleTime.getTime() > Date.now();
 
       const newPost = new Post({
         title: req.body.title,
@@ -162,30 +143,19 @@ router.get('/posts', async (req, res) => {
   const cacheKey = `posts:${start}:${limit}`;
 
   try {
-    let posts;
-    
-    
+      let posts;
       const isExist = await redisclient.exists(cacheKey);
-
       if(isExist) {
         console.log("Fetching posts from Redis cache...");
         const redisdata = await redisclient.get(cacheKey);
-
         posts = JSON.parse(redisdata)
-
-
-        
       } else {
-        // Fetch posts from the database if not cached
-
-        posts = await Post.find().sort({ createdAt: -1 }).skip(parseInt(start)).limit(parseInt(limit));
+        posts = await Post.find({status:'published'}).sort({ createdAt: -1 }).skip(parseInt(start)).limit(parseInt(limit));
         // Cache the posts in Redis
         await redisclient.setex("posts", 3600, JSON.stringify(posts));      
       }
-
-// console.log(totalPosts);
+    // console.log(totalPosts);
     res.json(posts);
-
   } catch (error) {
     console.error('Error fetching posts:', error);
     res.status(500).json({ message: 'Internal Server Error' });
@@ -883,11 +853,12 @@ const initializeScheduledPosts = async () => {
     scheduledPosts.forEach(post => {
       schedulePostPublishing(post._id, post.postScheduleTime);
     });
-    console.log(`Initialized ${scheduledPosts.length} scheduled posts`);
+    console.log(`Re-queued ${scheduledPosts.length} scheduled posts`);
   } catch (error) {
     console.error('Error initializing scheduled posts:', error);
   }
 };
+
 
 initializeScheduledPosts()
 
