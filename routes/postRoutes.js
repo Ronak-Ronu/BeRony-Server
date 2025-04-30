@@ -152,7 +152,7 @@ router.get('/posts', async (req, res) => {
       } else {
         posts = await Post.find({status:'published'}).sort({ createdAt: -1 }).skip(parseInt(start)).limit(parseInt(limit));
         // Cache the posts in Redis
-        await redisclient.setex("posts", 3600, JSON.stringify(posts));      
+        await redisclient.setex(cacheKey, 3600, JSON.stringify(posts));
       }
     // console.log(totalPosts);
     res.json(posts);
