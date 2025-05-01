@@ -62,33 +62,29 @@ const schedulePostPublishing = async (postId, scheduleTime) => {
   console.log(`Post ${postId} scheduled using Bull in ${delay / 1000} seconds.`);
 };
 
-
 router.post('/posts', upload.single('imageUrl'), async (req, res) => {
   try {
-    // const { title, bodyofcontent, endnotecontent } = req.body;
-
     console.log('Request Body:', req.body);
     console.log('File:', req.file);
     const filePath = req.file.path;
     console.log('File path:', filePath);
     const tagsArray = JSON.parse(req.body.tags);
-    const isVideo = req.file.mimetype.startsWith('video') || req.file.originalname.endsWith('.mp4')   ;
+    const isVideo = req.file.mimetype.startsWith('video') || req.file.originalname.endsWith('.mp4');
     const folderName = isVideo ? 'BlogData' : 'VBlogData';
 
-      if (req.file) {
+    if (req.file) {
       const resultimageurl = await cloudinary.uploader.upload(req.file.path, {
         folder: folderName,
         resource_type: isVideo ? 'video' : 'image',
       });
-      let newresultimageurl='';
+      let newresultimageurl = '';
       if (isVideo) {
-         newresultimageurl = `https://res.cloudinary.com/${process.env.CLOUD_NAME}/video/upload/${resultimageurl.public_id}.mp4`;
+        newresultimageurl = `https://res.cloudinary.com/${process.env.CLOUD_NAME}/video/upload/${resultimageurl.public_id}.mp4`;
       } else {
         newresultimageurl = `https://res.cloudinary.com/${process.env.CLOUD_NAME}/image/upload/${resultimageurl.public_id}`;
       }
 
-
-      const postScheduleTime = req.body.postScheduleTime? new Date(req.body.postScheduleTime):null;
+      const postScheduleTime = req.body.postScheduleTime ? new Date(req.body.postScheduleTime) : null;
       const isSchedule = postScheduleTime && postScheduleTime.getTime() > Date.now();
 
       const newPost = new Post({
@@ -100,16 +96,18 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
         userId: req.body.userId,
         username: req.body.username,
         createdAt: new Date(),
-        tags:tagsArray,
+        tags: tagsArray,
         postScheduleTime,
         status: isSchedule ? 'scheduled' : 'published',
       });
-      
+
       await newPost.save();
-      await redisclient.del("posts");
-      await redisclient.del(`posts:0:3`); 
-      await redisclient.del(`posts:3:3`); 
-  
+
+      const keys = await redisclient.keys('posts:*');
+      if (keys.length > 0) {
+        await redisclient.del(keys);
+        console.log(`Invalidated cache keys: ${keys.join(', ')}`);
+      }
 
       console.log(newPost);
 
@@ -119,16 +117,15 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
 
       fs.unlink(req.file.path, (err) => {
         if (err) {
-          console.error('error in deleting :', err);
+          console.error('Error in deleting:', err);
         } else {
-          console.log('file deleted');
+          console.log('File deleted');
         }
       });
-      console.log(newPost);
 
       res.json(newPost);
     } else {
-      return res.status(400).json({ message: 'file is missing' });
+      return res.status(400).json({ message: 'File is missing' });
     }
   } catch (error) {
     console.error('Error during post creation:', error);
@@ -150,9 +147,9 @@ router.get('/posts', async (req, res) => {
         const redisdata = await redisclient.get(cacheKey);
         posts = JSON.parse(redisdata)
       } else {
-        posts = await Post.find({status:'published'}).sort({ createdAt: -1 }).skip(parseInt(start)).limit(parseInt(limit));
+        posts = await Post.find({}).sort({ createdAt: -1 }).skip(parseInt(start)).limit(parseInt(limit));
         // Cache the posts in Redis
-        await redisclient.setex(cacheKey, 3600, JSON.stringify(posts));
+        await redisclient.setex("posts:*", 3600, JSON.stringify(posts));
       }
     // console.log(totalPosts);
     res.json(posts);

@@ -8,16 +8,26 @@ const redisclient = new Redis({
 });
 
 exports.publishScheduledPost = async (postId) => {
-  const post = await Post.findById(postId);
-  if (!post || post.status === 'published') return;
+  try {
+    const post = await Post.findByIdAndUpdate(
+      postId,
+      { status: 'published', createdAt: new Date() },
+      { new: true }
+    );
 
-  post.status = 'published';
-  await post.save();
+    if (!post) {
+      throw new Error('Post not found');
+    }
 
-  console.log(`Post ${postId} published via Bull job!`);
+    console.log(`Post ${postId} published successfully`);
 
-  await redisclient.del("posts");
-  await redisclient.del(`posts:0:3`);
-  await redisclient.del(`posts:3:3`);
-  await redisclient.del(`post:${postId}`);
+    const keys = await redisclient.keys('posts:*'); 
+    if (keys.length > 0) {
+      await redisclient.del(keys); 
+      console.log(`Invalidated cache keys: ${keys.join(', ')}`);
+    }
+  } catch (error) {
+    console.error(`Error publishing post ${postId}:`, error);
+    throw error; 
+  }
 };
