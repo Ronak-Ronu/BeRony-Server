@@ -9,9 +9,11 @@ const fs=require('fs')
 const Redis=require('ioredis')
 const cloudinary = require('../cloudinaryconfig')
 const nodemailer = require('nodemailer');
-require('dotenv').config();
 const postQueue = require('../queues/bullqueue');
 const { publishScheduledPost } = require('../worker/publishWorker');
+const Story = require('../models/Story'); 
+const Bull = require('bull');
+require('dotenv').config();
 
 
 const upload = multer({
@@ -25,12 +27,28 @@ const upload = multer({
   }
 });
 
+const uploadStory = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, 
+  fileFilter(req, file, cb) {
+    const fileTypes = /jpeg|jpg|png|mp4/;
+    const extname = fileTypes.test(file.originalname.toLowerCase().split('.').pop());
+    const mimetype = fileTypes.test(file.mimetype);
+    if (extname && mimetype) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only images (jpg, jpeg, png) and videos (mp4) are allowed'));
+    }
+  }
+});
+
 
 const redisclient = new Redis({
   host: process.env.REDIS_HOST  ,
   password: process.env.REDIS_PASSWORD ,
-  port: process.env.REDIS_PORT
+  port: process.env.REDIS_PORT,
 });
+
 
 redisclient.on('connect',()=>{
   console.log("redis is connected");
@@ -38,6 +56,26 @@ redisclient.on('connect',()=>{
 redisclient.on('error', (err) => {
   console.error('Redis error:', err);
 });
+
+const storyQueue = new Bull('story-queue', {
+  redis: {
+    host: process.env.REDIS_HOST,
+    port: process.env.REDIS_PORT,
+    password: process.env.REDIS_PASSWORD
+  }
+});
+storyQueue.process(async (job) => {
+  const { storyId, publicId, resourceType } = job.data;
+  try {
+    await Story.findByIdAndDelete(storyId);
+    await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
+    console.log(`Story ${storyId} deleted from MongoDB and Cloudinary`);
+  } catch (error) {
+    console.error(`Failed to delete story ${storyId}:`, error);
+    throw error;
+  }
+});
+
 
 const schedulePostPublishing = async (postId, scheduleTime) => {
   const delay = new Date(scheduleTime) - new Date();
@@ -147,7 +185,12 @@ router.get('/posts', async (req, res) => {
         const redisdata = await redisclient.get(cacheKey);
         posts = JSON.parse(redisdata)
       } else {
-        posts = await Post.find({}).sort({ createdAt: -1 }).skip(parseInt(start)).limit(parseInt(limit));
+        posts = await Post.find({ 
+            $or: [
+          { status: { $in: ['published', 'draft'] } },
+          { status: { $exists: false } }
+        ]
+      }).sort({ createdAt: -1 }).skip(parseInt(start)).limit(parseInt(limit));
         // Cache the posts in Redis
         await redisclient.setex("posts:*", 3600, JSON.stringify(posts));
       }
@@ -247,27 +290,50 @@ router.get('/user/:username/posts',async (req,res)=>{
 
 router.delete('/posts/:id', async (req, res) => {
   try {
-    const postid=req.params.id;
+    const postId = req.params.id;
 
-    const deletedPost = await Post.findByIdAndDelete(postid);
-    
+    const post = await Post.findById(postId);
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+
+    let publicId = null;
+    let resourceType = null;
+    if (post.imageUrl) {
+      const urlParts = post.imageUrl.split('/upload/');
+      publicId = urlParts[1]; // VBlogData/<filename>
+      resourceType = 'image';
+    } else if (post.videoUrl) {
+      const urlParts = post.videoUrl.split('/upload/');
+      publicId = urlParts[1].replace('.mp4', ''); 
+      resourceType = 'video';
+    }
+
+    if (publicId && resourceType) {
+      try {
+        await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
+        console.log(`Deleted ${resourceType} from Cloudinary: ${publicId}`);
+      } catch (cloudinaryError) {
+        console.error(`Failed to delete ${resourceType} from Cloudinary:`, cloudinaryError);
+      }
+    }
+
+    const deletedPost = await Post.findByIdAndDelete(postId);
     if (!deletedPost) {
       return res.status(404).json({ message: 'Post not found' });
     }
-    await redisclient.del("posts"); 
-    await redisclient.del(`post:${postid}`); 
 
+    await redisclient.del("posts");
+    await redisclient.del(`post:${postId}`);
     await redisclient.del(`posts:0:3`);
     await redisclient.del(`posts:3:3`);
 
-
-    res.json({ message: 'Post deleted successfully' });
+    res.json({ message: 'Post and associated media deleted successfully' });
   } catch (error) {
     console.error('Error deleting post:', error);
     res.status(500).json({ message: 'Internal Server Error' });
   }
 });
-
 
 
 router.patch('/posts/like/:id', async (req, res) => {
@@ -840,6 +906,75 @@ router.delete('/tree/:id', async (req, res) => {
     res.json({ message: 'tree deleted successfully' });
   } catch (error) {
     console.error('Error deleting post:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+router.post('/stories', uploadStory.single('story'), async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(401).json({ message: 'User authentication required' });
+    }
+
+    const user = await User.findOne({ userId });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ message: 'No file uploaded' });
+    }
+
+    const isVideo = req.file.mimetype.startsWith('video');
+    const result = await new Promise((resolve, reject) => {
+      cloudinary.uploader.upload_stream(
+        {
+          resource_type: isVideo ? 'video' : 'image',
+          folder: 'berony/stories'
+        },
+        (error, result) => {
+          if (error) reject(error);
+          resolve(result);
+        }
+      ).end(req.file.buffer);
+    });
+
+    const fileType = isVideo ? 'video' : 'image';
+
+    const story = new Story({
+      userId,
+      username: user.username, 
+      fileUrl: result.secure_url,
+      publicId: result.public_id,
+      fileType
+    });
+
+    await story.save();
+
+    await storyQueue.add(
+      { storyId: story._id, publicId: result.public_id, resourceType: fileType },
+      { delay: 24 * 60 * 60 * 1000, attempts: 3 }
+    );
+
+    await redisclient.del(`stories:${userId}`);
+    await redisclient.del(`stories:all`); // Invalidate stories cache
+
+    res.status(201).json({ message: 'Story uploaded successfully', story });
+  } catch (error) {
+    console.error('Error uploading story:', error);
+    res.status(500).json({ message: 'Internal Server Error', error: error.message });
+  }
+});
+
+
+router.get('/stories', async (req, res) => {
+  try {
+    const stories = await Story.find()
+      .sort({ createdAt: -1 });
+
+    res.json(stories);
+  } catch (error) {
+    console.error('Error fetching stories:', error);
     res.status(500).json({ message: 'Internal Server Error' });
   }
 });
