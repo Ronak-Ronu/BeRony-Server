@@ -23,7 +23,7 @@ const server = http.createServer(app);
 
 const io = socketIo(server, {
   cors: {
-    origin: 'https://berony.web.app/',
+    origin: '*',
     methods: ['GET', 'POST'],
     // allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true
@@ -32,7 +32,7 @@ const io = socketIo(server, {
 });
 
 app.use(cors({
-  origin: 'https://berony.web.app/read/',
+  origin: '*',
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true
 }));
