@@ -75,7 +75,7 @@ const channel = 'textChannel';
 redisSubscriber.subscribe(channel);
 
 redisSubscriber.on('message', (channel, message) => {
-  console.log('Redis message received:', message);
+  // console.log('Redis message received:', message);
   const { postId, text } = JSON.parse(message);
   io.to(postId).emit('textChange', text);
 });
@@ -201,16 +201,30 @@ app.get('/api/chat/:roomId', async (req, res) => {
   console.log(`GET /api/chat/${roomId} received`);
   try {
     const cachedChats = await redisPublisher.lrange(cacheKey, 0, -1);
-    let chats = cachedChats.length > 0
-      ? cachedChats.map(c => JSON.parse(c))
-      : await ChatMessage.find({ roomId }).sort({ createdAt: -1 }).limit(50);
+    if (cachedChats.length > 0) {
+      console.log(`Returning ${cachedChats.length} messages from Redis cache for room ${roomId}`);
+      return res.status(200).json(cachedChats.map(c => JSON.parse(c)));
+    }
+    
+    console.log(`No cached messages found in Redis for room ${roomId}, fetching from MongoDB`);
+    const chats = await ChatMessage.find({ roomId })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean(); 
+    if (chats.length === 0) {
+      console.log(`No messages found in MongoDB for room ${roomId}`);
+    } else {
+      console.log(`Found ${chats.length} messages in MongoDB for room ${roomId}`);
+      await redisPublisher.del(cacheKey); 
+      await redisPublisher.lpush(cacheKey, chats.map(c => JSON.stringify(c)));
+      await redisPublisher.expire(cacheKey, 3600); 
+    }
     res.status(200).json(chats);
   } catch (error) {
-    console.error('Error fetching chat history:', error);
+    console.error(`Error fetching chat history for room ${roomId}:`, error);
     res.status(500).json({ message: 'Internal Server Error', error: error.message });
   }
 });
-
 io.use(async (socket, next) => {
   const { userId, username } = socket.handshake.auth;
   console.log('Socket.io auth:', { userId, username });
@@ -298,6 +312,7 @@ io.on('connection', (socket) => {
 
   socket.on('textChange', (text) => {
     socket.to(socket.postId).emit('textChange', text);
+    redisPublisher.publish(channel, JSON.stringify({ postId: socket.postId, text }));
   });
 
   socket.on('startEditing', () => {
@@ -346,7 +361,7 @@ io.on('connection', (socket) => {
 app.use('/api', postRoutes);
 app.use('/api', askronyai);
 app.use('/api', draftRoutes);
-app.use('/api', meetingRoutes);
+// app.use('/api', meetingRoutes);
 
 function sendRequest() {
   axios.get(process.env.API_LIVE_URL)
