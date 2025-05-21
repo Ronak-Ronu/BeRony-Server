@@ -914,9 +914,9 @@ router.delete('/tree/:id', async (req, res) => {
 });
 router.post('/stories', uploadStory.single('story'), async (req, res) => {
   try {
-    const { userId } = req.body;
+    const { userId , description} = req.body;
     if (!userId) {
-      return res.status(401).json({ message: 'User authentication required' });
+      return res.status(401).json({ message: 'Login/SignUp to add stories' });
     }
 
     const user = await User.findOne({ userId });
@@ -949,7 +949,8 @@ router.post('/stories', uploadStory.single('story'), async (req, res) => {
       username: user.username, 
       fileUrl: result.secure_url,
       publicId: result.public_id,
-      fileType
+      fileType,
+      description
     });
 
     await story.save();
