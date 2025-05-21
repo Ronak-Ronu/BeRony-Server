@@ -29,7 +29,7 @@ const upload = multer({
 
 const uploadStory = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, 
+  limits: { fileSize: 20 * 1024 * 1024 }, 
   fileFilter(req, file, cb) {
     const fileTypes = /jpeg|jpg|png|mp4/;
     const extname = fileTypes.test(file.originalname.toLowerCase().split('.').pop());
