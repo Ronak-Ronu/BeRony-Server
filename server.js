@@ -311,7 +311,8 @@ io.on('connection', (socket) => {
   });
 
   socket.on('textChange', (text) => {
-    socket.to(socket.postId).emit('textChange', text);
+    console.log(`Text change received for post ${socket.postId}:`, text); 
+    socket.to(socket.postId).emit('textChange', text); 
     redisPublisher.publish(channel, JSON.stringify({ postId: socket.postId, text }));
   });
 
@@ -331,6 +332,13 @@ io.on('connection', (socket) => {
       position
     });
   });
+
+  socket.on('joinPostRoom', (postId) => {
+    socket.postId = postId; // Set postId on the socket
+    socket.join(postId);
+    console.log(`User ${socket.username} (${socket.userId}) joined room: ${postId}`);
+  });
+
 
   socket.on('saveChanges', async (text) => {
     try {
