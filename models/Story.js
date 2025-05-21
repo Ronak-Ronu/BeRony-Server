@@ -6,6 +6,7 @@ const storySchema = new mongoose.Schema({
   fileUrl: { type: String, required: true },
   publicId: { type: String, required: true },
   fileType: { type: String, enum: ['image', 'video'], required: true },
+  views: { type: Number, default: 0 },
   createdAt: { type: Date, default: Date.now },
   expiresAt: { type: Date, default: () => Date.now() + 24 * 60 * 60 * 1000 }
 });

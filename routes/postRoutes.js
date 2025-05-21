@@ -70,6 +70,9 @@ storyQueue.process(async (job) => {
     await Story.findByIdAndDelete(storyId);
     await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
     console.log(`Story ${storyId} deleted from MongoDB and Cloudinary`);
+    io.emit('storyDeleted', { storyId });
+    await redisclient.del(`story:${storyId}`);
+    await redisclient.del(`stories:all`);
   } catch (error) {
     console.error(`Failed to delete story ${storyId}:`, error);
     throw error;
@@ -976,6 +979,33 @@ router.get('/stories', async (req, res) => {
   } catch (error) {
     console.error('Error fetching stories:', error);
     res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+router.get('/stories/:id', async (req, res) => {
+  const { id } = req.params;
+  const cacheKey = `story:${id}`;
+  try {
+    const cachedStory = await redisclient.get(cacheKey);
+    if (cachedStory) {
+      console.log(`Returning story ${id} from Redis cache`);
+      const story = JSON.parse(cachedStory);
+      await Story.findByIdAndUpdate(id, { $inc: { views: 1 } }, { new: true });
+      story.views += 1;
+      await redisclient.setex(cacheKey, 3600, JSON.stringify(story));
+      return res.status(200).json(story);
+    }
+
+    const story = await Story.findByIdAndUpdate(id, { $inc: { views: 1 } }, { new: true }).lean();
+    if (!story) {
+      console.log(`Story ${id} not found`);
+      return res.status(404).json({ message: 'Story not found' });
+    }
+    await redisclient.setex(cacheKey, 3600, JSON.stringify(story));
+    console.log(`Returning story ${id} from MongoDB`);
+    res.status(200).json(story);
+  } catch (error) {
+    console.error(`Error fetching story ${id}:`, error);
+    res.status(500).json({ message: 'Internal Server Error', error: error.message });
   }
 });
 
