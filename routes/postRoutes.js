@@ -13,6 +13,7 @@ const postQueue = require('../queues/bullqueue');
 const { publishScheduledPost } = require('../worker/publishWorker');
 const Story = require('../models/Story'); 
 const Bull = require('bull');
+const { PredictionServiceClient } = require('@google-cloud/aiplatform');
 require('dotenv').config();
 
 
@@ -982,6 +983,7 @@ router.get('/stories', async (req, res) => {
     res.status(500).json({ message: 'Internal Server Error' });
   }
 });
+
 router.get('/stories/:id', async (req, res) => {
   const { id } = req.params;
   const cacheKey = `story:${id}`;
@@ -1009,6 +1011,120 @@ router.get('/stories/:id', async (req, res) => {
     res.status(500).json({ message: 'Internal Server Error', error: error.message });
   }
 });
+
+
+
+// this will run but required billing so i dont have money postponding to future
+router.post('/generate-story', async (req, res) => {
+  const { userId, prompt, description, mediaType = 'image' } = req.body;
+
+  if (!userId || !prompt) {
+    return res.status(400).json({ success: false, error: 'userId and prompt are required' });
+  }
+
+  const user = await User.findOne({ userId });
+  if (!user) {
+    return res.status(404).json({ success: false, error: 'User not found' });
+  }
+
+  try {
+    cloudinary.config({
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key: process.env.CLOUDINARY_API_KEY,
+      api_secret: process.env.CLOUDINARY_API_SECRET,
+    });
+
+    const client = new PredictionServiceClient({
+      project: process.env.GOOGLE_CLOUD_PROJECT,
+      location: process.env.GOOGLE_CLOUD_LOCATION || 'us-central1',
+    });
+
+    // Temporary file path
+    const tempFilePath = `/tmp/${Date.now()}.png`;
+
+    // Generate media (image only for now)
+    if (mediaType !== 'image') {
+      throw new Error('Only image generation is supported. Use mediaType="image".');
+    }
+
+    const endpoint = `projects/${process.env.GOOGLE_CLOUD_PROJECT}/locations/${process.env.GOOGLE_CLOUD_LOCATION}/publishers/google/models/imagegeneration@006`;
+    const instance = {
+      prompt: prompt,
+    };
+    const parameters = {
+      sampleCount: 1,
+      aspectRatio: '1:1',
+      outputFormat: 'png',
+    };
+
+    const [response] = await client.predict({
+      endpoint,
+      instance: { structValue: { fields: { prompt: { stringValue: prompt } } } },
+      parameters: {
+        structValue: {
+          fields: {
+            sampleCount: { numberValue: 1 },
+            aspectRatio: { stringValue: '1:1' },
+            outputFormat: { stringValue: 'png' },
+          },
+        },
+      },
+    });
+
+    const imageBase64 = response.predictions[0].structValue.fields.bytesBase64Encoded.stringValue;
+    const imageBuffer = Buffer.from(imageBase64, 'base64');
+    await fs.writeFile(tempFilePath, imageBuffer);
+
+    const uploadResult = await cloudinary.uploader.upload(tempFilePath, {
+      resource_type: 'image',
+      folder: `berony/stories`,
+      public_id: `${Date.now()}`,
+      context: { description: description || '' },
+    });
+
+    const story = new Story({
+      userId,
+      username: user.username,
+      fileUrl: uploadResult.secure_url,
+      publicId: uploadResult.public_id,
+      fileType: 'image',
+      description,
+    });
+    await story.save();
+
+    await storyQueue.add(
+      { storyId: story._id, publicId: uploadResult.public_id, resourceType: 'image' },
+      { delay: 24 * 60 * 60 * 1000, attempts: 3 }
+    );
+
+    await redisclient.del(`stories:${userId}`);
+    await redisclient.del(`stories:all`);
+
+    await fs.unlink(tempFilePath);
+
+    res.json({
+      success: true,
+      storyId: story._id,
+      fileUrl: uploadResult.secure_url,
+      publicId: uploadResult.public_id,
+      fileType: 'image',
+    });
+  } catch (error) {
+    console.error(`Error generating or uploading ${mediaType}:`, error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+// ​http://localhost:3000/api/generate-story
+// {
+//   "userId": "",
+//   "prompt": "A vibrant city skyline at night",
+//   "description": "A beautiful cityscape for a user story",
+//   "mediaType": "image"
+// }
+
+
+
+
 
 const initializeScheduledPosts = async () => {
   try {
