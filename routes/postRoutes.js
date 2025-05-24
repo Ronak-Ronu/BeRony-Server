@@ -13,7 +13,9 @@ const postQueue = require('../queues/bullqueue');
 const { publishScheduledPost } = require('../worker/publishWorker');
 const Story = require('../models/Story'); 
 const Bull = require('bull');
-const { PredictionServiceClient } = require('@google-cloud/aiplatform');
+const notificationQueue = require('../queues/notificationQueue'); 
+// const { PredictionServiceClient } = require('@google-cloud/aiplatform');
+
 require('dotenv').config();
 
 
@@ -152,6 +154,32 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
       }
 
       console.log(newPost);
+
+      if (!isSchedule) {
+        const author = await User.findOne({ userId: req.body.userId });
+        const followers = await User.find({
+          userId: { $in: author.followers || [] },
+        });
+
+        for (const follower of followers) {
+          await notificationQueue.add({
+            userEmail: follower.userEmail,
+            authorName: author.username,
+            postTitle: newPost.title,
+            postId: newPost._id
+          }, { attempts: 3, backoff: { type: 'exponential', delay: 3000 } });
+        }
+        console.log(`Queued notifications for ${followers.length} followers for post ${newPost._id}`);
+
+        // io.emit('newPost', {
+        //   postId: newPost._id,
+        //   title: newPost.title,
+        //   authorName: newPost.username,
+        //   authorId: newPost.userId
+        // });
+      }
+
+
 
       if (isSchedule) {
         schedulePostPublishing(newPost._id, postScheduleTime);

@@ -124,8 +124,11 @@ const chatUpload = multer({
 });
 
 const chatCleanupQueue = new Bull('chat-cleanup-queue', {
-  redis: redisConfig
-});
+  redis: {
+    host: process.env.REDIS_HOST,
+    port: process.env.REDIS_PORT,
+    password: process.env.REDIS_PASSWORD
+  }});
 
 chatCleanupQueue.process(async () => {
   try {
@@ -147,8 +150,17 @@ chatCleanupQueue.process(async () => {
 });
 
 chatCleanupQueue.add({}, {
-  repeat: { every: 24 * 60 * 60 * 1000 },
+  repeat: { every: 60 * 1000 },
   attempts: 3
+}).then(() => {
+  console.log('Chat cleanup job scheduled');
+});
+
+chatCleanupQueue.on('error', (error) => {
+  console.error('Chat cleanup queue error:', error);
+});
+chatCleanupQueue.on('failed', (job, error) => {
+  console.error(`Chat cleanup job ${job.id} failed:`, error);
 });
 
 app.get('/api/chat/rooms', async (req, res) => {
@@ -365,6 +377,20 @@ io.on('connection', (socket) => {
     socket.to(socket.postId).emit('cursorRemove', { userId: socket.userId });
   });
 });
+
+// io.on('newPost', async (data) => {
+//   const { postId, title, authorName, authorId } = data;
+//   const author = await User.findOne({ userId: authorId });
+//   const followers = author.followers || [];
+//   followers.forEach(followerId => {
+//     io.to(`user:${followerId}`).emit('newPostNotification', {
+//       postId,
+//       title,
+//       authorName,
+//       message: `${authorName} published a new post: ${title}`
+//     });
+//   });
+// });
 
 app.use('/api', postRoutes);
 app.use('/api', askronyai);
