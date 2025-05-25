@@ -1,21 +1,25 @@
 const mongoose = require("mongoose");
 
-const TreeSchema = new mongoose.Schema({
-  userId: { type: String, required: true, unique: true }, 
+const ItemSchema = new mongoose.Schema({
+  userId: { type: String, required: true },
   username: { type: String, required: true },
+  itemType: { 
+    type: String, 
+    required: true, 
+    enum: ['tree', 'flower', 'bench', 'swingSet'] 
+  },
   position: { type: [Number], required: true },
   woodColor: { 
     type: String, 
-    default: "#8B5A2B",
-    match: /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/
+    match: /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/,
+    default: null
   },
   leafColor: { 
     type: String, 
-    default: "#00FF00",
-    match: /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/ 
+    match: /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/,
+    default: null
   },
 });
 
-
-const Tree = mongoose.model("Tree", TreeSchema);
-module.exports = Tree;
+const Item = mongoose.model("Item", ItemSchema);
+module.exports = Item;

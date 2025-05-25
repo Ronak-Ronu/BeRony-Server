@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Post = require('../models/Posts');
 const Bookmark=require('../models/Bookmark')
-const Tree = require('../models/Tree')
+const Item = require('../models/Tree')
 const User=require('../models/User')
 const multer = require('multer');
 const fs=require('fs')
@@ -889,58 +889,57 @@ router.get('/sitemap.xml',async (req,res)=>{
   }
 })
 
-router.get("/tree", async (req, res) => {
+router.get("/items", async (req, res) => {
   try {
-    const trees = await Tree.find();
-    res.json(trees);
+    const items = await Item.find();
+    res.json(items);
   } catch (error) {
-    res.status(500).json({ message: "Error fetching trees" });
+    res.status(500).json({ message: "Error fetching items" });
   }
 });
 
-router.post("/tree", async (req, res) => {
-  // console.log("Received body:", req.body); 
-  const { userId, position, woodColor, leafColor } = req.body;
-
+router.post("/items", async (req, res) => {
+  const { userId, itemType, position, woodColor, leafColor, username } = req.body;
   try {
-    const user = await User.findOne({userId})
-    // console.log(user);
+    const user = await User.findOne({ userId });
     if (!user) return res.status(404).json({ message: "User not found" });
-    
-    const existingTree = await Tree.findOne({ userId });
-    if (existingTree) return res.status(400).json({ message: "User already planted a tree" });
-
-    const newTree = new Tree({
-      userId: user.userId,
+    if (!['tree', 'flower', 'bench', 'swingSet'].includes(itemType)) {
+      return res.status(400).json({ message: "Invalid item type" });
+    }
+    const existingItem = await Item.findOne({ userId });
+    if (existingItem) {
+      return res.status(400).json({ message: "User has already planted an item" });
+    }
+    const newItem = new Item({
+      userId,
       username: user.username,
+      itemType,
       position,
-      woodColor: woodColor || "#8B5A2B",
-      leafColor: leafColor || "#00FF00"
+      woodColor: woodColor || null,
+      leafColor: leafColor || null
     });
-
-    await newTree.save();
-    res.status(201).json(newTree);
+    await newItem.save();
+    res.status(201).json(newItem);
   } catch (error) {
-    res.status(500).json({ message: "Error saving tree" });
+    res.status(500).json({ message: "Error saving item", error: error.message });
   }
 });
 
-
-router.delete('/tree/:id', async (req, res) => {
+router.delete('/items/:id', async (req, res) => {
   try {
-    const userId=req.params.id;
-
-    const deletedTree = await Tree.findOneAndDelete({userId:userId})
-    
-    if (!deletedTree) {
-      return res.status(404).json({ message: 'tree not found' });
+    const itemId = req.params.id;
+    const deletedItem = await Item.findByIdAndDelete(itemId);
+    if (!deletedItem) {
+      return res.status(404).json({ message: 'Item not found' });
     }
-    res.json({ message: 'tree deleted successfully' });
+    res.json({ message: 'Item deleted successfully' });
   } catch (error) {
-    console.error('Error deleting post:', error);
+    console.error('Error deleting item:', error);
     res.status(500).json({ message: 'Internal Server Error' });
   }
 });
+
+
 router.post('/stories', uploadStory.single('story'), async (req, res) => {
   try {
     const { userId , description} = req.body;
