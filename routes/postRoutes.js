@@ -925,19 +925,22 @@ router.post("/items", async (req, res) => {
   }
 });
 
-router.delete('/items/:id', async (req, res) => {
+router.delete('/items/:userId', async (req, res) => {
+  const userId = req.params.userId;
+
   try {
-    const itemId = req.params.id;
-    const deletedItem = await Item.findByIdAndDelete(itemId);
+    const deletedItem = await Item.findOneAndDelete({ userId });
     if (!deletedItem) {
-      return res.status(404).json({ message: 'Item not found' });
+      return res.status(404).json({ message: 'Item not found for this user' });
     }
     res.json({ message: 'Item deleted successfully' });
   } catch (error) {
-    console.error('Error deleting item:', error);
+    console.error('Error deleting item by userId:', error);
     res.status(500).json({ message: 'Internal Server Error' });
   }
 });
+
+
 
 
 router.post('/stories', uploadStory.single('story'), async (req, res) => {
