@@ -218,7 +218,7 @@ app.get('/api/chat/:roomId', async (req, res) => {
     
     console.log(`No cached messages found in Redis for room ${roomId}, fetching from MongoDB`);
     const chats = await ChatMessage.find({ roomId })
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: 1 })
       .limit(50)
       .lean(); 
     if (chats.length === 0) {
@@ -227,6 +227,7 @@ app.get('/api/chat/:roomId', async (req, res) => {
       console.log(`Found ${chats.length} messages in MongoDB for room ${roomId}`);
       await redisPublisher.del(cacheKey); 
       await redisPublisher.lpush(cacheKey, chats.map(c => JSON.stringify(c)));
+      await redisPublisher.ltrim(cacheKey, 0, 49);
       await redisPublisher.expire(cacheKey, 3600); 
     }
     res.status(200).json(chats);
@@ -254,15 +255,17 @@ io.on('connection', (socket) => {
     socket.join(roomId);
     console.log(`User ${socket.username} (${socket.id}) joined room: ${roomId}`);
     ChatMessage.find({ roomId })
-      .sort({ createdAt: 1 })
-      .then(messages => {
-        console.log(`Sending chat history for room ${roomId}:`, messages.length, 'messages');
-        socket.emit('chatHistory', messages);
-      })
-      .catch(err => {
-        console.error('Error fetching chat history:', err);
-        socket.emit('chatError', { message: 'Failed to load chat history' });
-      });
+    .sort({ createdAt: 1 })
+    .limit(50)
+    .lean()
+    .then(messages => {
+      console.log(`Sending chat history for room ${roomId}:`, messages.length, 'messages');
+      socket.emit('chatHistory', messages);
+    })
+    .catch(err => {
+      console.error('Error fetching chat history:', err);
+      socket.emit('chatError', { message: 'Failed to load chat history' });
+    });
   });
 
   socket.on('sendChatMessage', async (data) => {
@@ -271,7 +274,6 @@ io.on('connection', (socket) => {
       console.log('Received chat message:', { roomId, message, media: !!media });
       let mediaUrl, mediaType;
       if (media) {
-        // Validate media
         if (!media.buffer || !media.mimetype) {
           throw new Error('Invalid media data');
         }
@@ -375,20 +377,6 @@ io.on('connection', (socket) => {
     socket.to(socket.postId).emit('cursorRemove', { userId: socket.userId });
   });
 });
-
-// io.on('newPost', async (data) => {
-//   const { postId, title, authorName, authorId } = data;
-//   const author = await User.findOne({ userId: authorId });
-//   const followers = author.followers || [];
-//   followers.forEach(followerId => {
-//     io.to(`user:${followerId}`).emit('newPostNotification', {
-//       postId,
-//       title,
-//       authorName,
-//       message: `${authorName} published a new post: ${title}`
-//     });
-//   });
-// });
 
 app.use('/api', postRoutes);
 app.use('/api', askronyai);
