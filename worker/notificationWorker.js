@@ -1,5 +1,6 @@
+require('dotenv').config();
 const nodemailer = require('nodemailer');
-const notificationQueue = require('../queues/notificationQueue');
+const User = require('../models/User');
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -9,14 +10,34 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-notificationQueue.process(async (job) => {
-  const { userEmail, authorName, postTitle, postId } = job.data;
 
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
-    to: userEmail,
-    subject: `Check This New Post By ${authorName}!`,
-    html: `
+transporter.verify((error, success) => {
+  if (error) {
+    console.error('Nodemailer configuration error:', error);
+    process.exit(1);
+  } else {
+    console.log('Nodemailer ready to send emails');
+  }
+  if (success) {
+    console.log('Nodemailer configuration verified successfully');
+  }
+});
+exports.sendEmailNotification = async (followerId, authorName, postTitle, postId) => {
+  // const { followerId, authorName, postTitle, postId } = job.data;
+  // console.log(`Processing job ${job.id} for follower ${followerId}`);
+
+  try{
+    const follower = await User.findOne({ userId: followerId })
+    if (!follower) {
+      console.warn(`Follower with ID ${followerId} not found`);
+      return; // Skip job instead of throwing
+    }
+
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: follower.userEmail,
+      subject: `New Post by ${authorName}`,
+      html: `
       <!DOCTYPE html>
       <html lang="en">
       <head>
@@ -52,14 +73,17 @@ notificationQueue.process(async (job) => {
         </div>
       </body>
       </html>
-    `
-  };
+      `
+    };
 
-  try {
-    await transporter.sendMail(mailOptions);
-    console.log(`Email sent to ${userEmail} for post ${postId}`);
-  } catch (error) {
-    console.error(`Failed to send email to ${userEmail}:`, error);
-    throw error;
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`Email sent to ${follower.userEmail}: ${info.response}`);
+
+
   }
-});
+  catch (error) {
+    console.error('Error sending email notification:', error);
+    throw error; 
+  }
+
+}

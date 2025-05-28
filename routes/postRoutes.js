@@ -106,6 +106,7 @@ const schedulePostPublishing = async (postId, scheduleTime) => {
   console.log(`Post ${postId} scheduled using Bull in ${delay / 1000} seconds.`);
 };
 
+
 router.post('/posts', upload.single('imageUrl'), async (req, res) => {
   try {
     console.log('Request Body:', req.body);
@@ -155,29 +156,39 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
 
       console.log(newPost);
 
-      if (!isSchedule) {
-        const author = await User.findOne({ userId: req.body.userId });
-        const followers = await User.find({
-          userId: { $in: author.followers || [] },
-        });
+      // if (!isSchedule) {
+      //   const author = await User.findOne({ userId: req.body.userId });
+      //   const followers = await User.find({
+      //     userId: { $in: author.followers || [] },
+      //   });
 
-        for (const follower of followers) {
-          await notificationQueue.add({
-            userEmail: follower.userEmail,
-            authorName: author.username,
+      //   for (const follower of followers) {
+      //     await notificationQueue.add({
+      //       userEmail: follower.userEmail,
+      //       authorName: author.username,
+      //       postTitle: newPost.title,
+      //       postId: newPost._id
+      //     }, { attempts: 3, backoff: { type: 'exponential', delay: 3000 } });
+      //   }
+      //   console.log(`Queued notifications for ${followers.length} followers for post ${newPost._id}`);
+      // }
+      const user = await User.findOne({ userId: req.body.userId });
+      if (user && Array.isArray(user.followers) && user.followers.length > 0) {
+        user.followers.forEach((followerId) => {
+
+          notificationQueue.add({
+            followerId,
+            authorName: user.username,
             postTitle: newPost.title,
             postId: newPost._id
           }, { attempts: 3, backoff: { type: 'exponential', delay: 3000 } });
-        }
-        console.log(`Queued notifications for ${followers.length} followers for post ${newPost._id}`);
 
-        // io.emit('newPost', {
-        //   postId: newPost._id,
-        //   title: newPost.title,
-        //   authorName: newPost.username,
-        //   authorId: newPost.userId
-        // });
+        });
+      } else {
+        console.log('No followers found for the user.');
       }
+      console.log(`Queued notifications for ${user.followers.length} followers for post ${newPost._id}`);
+      
 
 
 

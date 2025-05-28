@@ -11,6 +11,9 @@ const UserSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+UserSchema.index({ userId: 1 });
+
+
 UserSchema.pre('save', function(next) {
     if (this.isNew && this.username) {
       this.userBio = `Hello, I'm ${this.username} :)`;
