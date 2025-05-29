@@ -11,7 +11,6 @@ const draftRoutes = require('./routes/draftRoutes');
 const Post = require('./models/Posts');
 const helmet = require('helmet');
 const askronyai = require('./routes/askronyai');
-const meetingRoutes = require('./routes/meetingRoutes');
 const multer = require('multer');
 const Bull = require('bull');
 const cloudinary = require('./cloudinaryconfig')
@@ -237,7 +236,7 @@ app.get('/api/chat/:roomId', async (req, res) => {
   }
 });
 io.use(async (socket, next) => {
-  const { userId, username } = socket.handshake.auth;
+  const { userId, username, postId } = socket.handshake.auth;
   console.log('Socket.io auth:', { userId, username });
   if (!userId || !username) {
     console.error('Socket.io auth failed: Missing userId or username');
@@ -245,6 +244,14 @@ io.use(async (socket, next) => {
   }
   socket.userId = userId;
   socket.username = username;
+  socket.postId = postId;
+  if (postId && mongoose.Types.ObjectId.isValid(postId)) {
+    socket.join(postId);
+    console.log(`Socket joined post room: ${postId}`);
+  } else if (postId) {
+    console.log(`Invalid postId: ${postId}`);
+    socket.emit('error', { message: 'Invalid post ID' });
+  }
   next();
 });
 
@@ -328,8 +335,9 @@ io.on('connection', (socket) => {
     redisPublisher.publish(channel, JSON.stringify({ postId: socket.postId, text }));
   });
 
-  socket.on('startEditing', () => {
-    io.to(socket.postId).emit('startEditing', socket.username);
+  socket.on('startEditing', (username) => {
+    console.log(`Broadcasting startEditing for user: ${username} to room: ${socket.postId}`);
+    io.to(socket.postId).emit('startEditing', username);
   });
 
   socket.on('canvasUpdate', (data) => {
