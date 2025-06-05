@@ -17,6 +17,7 @@ const PostSchema = new mongoose.Schema({
   collaborators: [{ type: String }],
   postScheduleTime: { type: Date, default: Date.now },
   status: { type: String,enum: ['draft','scheduled','published'],  default: 'draft' },
+  pollId: { type: String, default: null }, 
 });
 
 
