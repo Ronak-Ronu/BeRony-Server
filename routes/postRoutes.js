@@ -14,6 +14,9 @@ const { publishScheduledPost } = require('../worker/publishWorker');
 const Story = require('../models/Story'); 
 const Bull = require('bull');
 const notificationQueue = require('../queues/notificationQueue'); 
+const Poll = require('../models/Poll'); 
+const pollQueue = require('../queues/pollqueue'); 
+const UserActivity = require('../models/UserActivitySchema');
 // const { PredictionServiceClient } = require('@google-cloud/aiplatform');
 
 require('dotenv').config();
@@ -114,6 +117,7 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
     const filePath = req.file.path;
     console.log('File path:', filePath);
     const tagsArray = JSON.parse(req.body.tags);
+    const { pollId } = req.body;
     const isVideo = req.file.mimetype.startsWith('video') || req.file.originalname.endsWith('.mp4');
     const folderName = isVideo ? 'BlogData' : 'VBlogData';
 
@@ -144,6 +148,7 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
         tags: tagsArray,
         postScheduleTime,
         status: isSchedule ? 'scheduled' : 'published',
+        pollId: pollId || null,
       });
 
       await newPost.save();
@@ -244,36 +249,45 @@ router.get('/posts', async (req, res) => {
     res.status(500).json({ message: 'Internal Server Error' });
   }
 });
-
 router.get('/findpost', async (req, res) => {
-  const { q: query = '', tags: tag = '', start = 0, limit = 3 } = req.query
+  const { q: query = '', tags: tag = '', start = 0, limit = 3 } = req.query;
 
   try {
-    let posts;
-    if(tag)
-    {
-        posts=await Post.find({tags:tag}).sort({ createdAt: -1 }).skip(parseInt(start)).limit(parseInt(limit));
-    }
-    else if(query) {
-      const decodedQuery = decodeURIComponent(query.trim());
+    let posts = [];
+    let users = [];
 
+    if (tag) {
+      posts = await Post.find({ tags: tag })
+        .sort({ createdAt: -1 })
+        .skip(parseInt(start))
+        .limit(parseInt(limit));
+    } else if (query) {
+      const decodedQuery = decodeURIComponent(query.trim());
       const searchWords = decodedQuery.split(/\s+/);
 
-      const searchConditions = searchWords.map(word => ({
+      const searchConditions = searchWords.map((word) => ({
         $or: [
           { title: { $regex: word, $options: 'i' } }, // 'i' makes it case-insensitive
-          { bodyofcontent: { $regex: word, $options: 'i' } }
-        ]
-      }))
+          { bodyofcontent: { $regex: word, $options: 'i' } },
+          { tags: { $regex: tag, $options: 'i' } }
+        ],
+      }));
+
       posts = await Post.find({ $and: searchConditions }).sort({ createdAt: -1 });
 
+      // Search for users
+      const userSearchConditions = searchWords.map((word) => ({
+        username: { $regex: word, $options: 'i' },
+      }));
+
+      users = await User.find({ $or: userSearchConditions });
     } else {
       posts = await Post.find().sort({ createdAt: -1 });
     }
-    res.json(posts);
 
+    res.json({ posts, users });
   } catch (error) {
-    console.error('Error fetching query posts:', error);
+    console.error('Error fetching query posts or users:', error);
     res.status(500).json({ message: 'Internal Server Error' });
   }
 });
@@ -1054,107 +1068,303 @@ router.get('/stories/:id', async (req, res) => {
 });
 
 
+router.get('/users/:userId/suggestions', async (req, res) => {
+  const { userId } = req.params;
 
-// this will run but required billing so i dont have money postponding to future
-router.post('/generate-story', async (req, res) => {
-  const { userId, prompt, description, mediaType = 'image' } = req.body;
+  try {
+    const currentUser = await User.findOne({ userId });
+    if (!currentUser) {
+      return res.status(404).json({ message: 'User not found' });
+    }
 
-  if (!userId || !prompt) {
-    return res.status(400).json({ success: false, error: 'userId and prompt are required' });
+    const visited = new Set(); 
+    const queue = [userId]; 
+    const suggestions = new Map(); // Store suggestion scores (userId -> score)
+    visited.add(userId);
+
+    let level = 0;
+    while (queue.length > 0 && level < 2) { 
+      const levelSize = queue.length;
+      for (let i = 0; i < levelSize; i++) {
+        const currentUserId = queue.shift();
+        const user = await User.findOne({ userId: currentUserId }).select('following');
+        if (!user || !user.following) continue;
+
+        for (const followeeId of user.following) {
+          if (!visited.has(followeeId)) {
+            visited.add(followeeId);
+            queue.push(followeeId);
+
+            if (level === 1 && followeeId !== userId && !currentUser.following.includes(followeeId)) {
+              suggestions.set(followeeId, (suggestions.get(followeeId) || 0) + 1);
+            }
+          }
+        }
+      }
+      level++;
+    }
+
+    const suggestionList = Array.from(suggestions.entries())
+      .map(([userId, score]) => ({ userId, score }))
+      .sort((a, b) => b.score - a.score); // Higher score = more mutual connections
+
+    // Fetch user details for suggestions
+    const suggestionUsers = await User.find({ userId: { $in: suggestionList.map(s => s.userId) } })
+      .select('userId username userBio userEmail');
+    
+    const result = suggestionUsers.map(user => ({
+      userId: user.userId,
+      username: user.username,
+      userBio: user.userBio,
+      userEmail: user.userEmail,
+      score: suggestionList.find(s => s.userId === user.userId).score,
+    }));
+
+    res.json(result);
+  } catch (error) {
+    console.error('Error fetching user suggestions:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
   }
+});
 
-  const user = await User.findOne({ userId });
-  if (!user) {
-    return res.status(404).json({ success: false, error: 'User not found' });
+
+router.post('/create-poll', async (req, res) => {
+  const { question, options } = req.body;
+
+  if (!question || !options || options.length < 2) {
+    return res.status(400).json({ success: false, error: 'Question and at least two options are required.' });
   }
 
   try {
-    cloudinary.config({
-      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-      api_key: process.env.CLOUDINARY_API_KEY,
-      api_secret: process.env.CLOUDINARY_API_SECRET,
-    });
+    const poll = await Poll.create({ question, options, votes: Array(options.length).fill(0) });
 
-    const client = new PredictionServiceClient({
-      project: process.env.GOOGLE_CLOUD_PROJECT,
-      location: process.env.GOOGLE_CLOUD_LOCATION || 'us-central1',
-    });
-
-    // Temporary file path
-    const tempFilePath = `/tmp/${Date.now()}.png`;
-
-    // Generate media (image only for now)
-    if (mediaType !== 'image') {
-      throw new Error('Only image generation is supported. Use mediaType="image".');
-    }
-
-    const endpoint = `projects/${process.env.GOOGLE_CLOUD_PROJECT}/locations/${process.env.GOOGLE_CLOUD_LOCATION}/publishers/google/models/imagegeneration@006`;
-    const instance = {
-      prompt: prompt,
-    };
-    const parameters = {
-      sampleCount: 1,
-      aspectRatio: '1:1',
-      outputFormat: 'png',
-    };
-
-    const [response] = await client.predict({
-      endpoint,
-      instance: { structValue: { fields: { prompt: { stringValue: prompt } } } },
-      parameters: {
-        structValue: {
-          fields: {
-            sampleCount: { numberValue: 1 },
-            aspectRatio: { stringValue: '1:1' },
-            outputFormat: { stringValue: 'png' },
-          },
-        },
-      },
-    });
-
-    const imageBase64 = response.predictions[0].structValue.fields.bytesBase64Encoded.stringValue;
-    const imageBuffer = Buffer.from(imageBase64, 'base64');
-    await fs.writeFile(tempFilePath, imageBuffer);
-
-    const uploadResult = await cloudinary.uploader.upload(tempFilePath, {
-      resource_type: 'image',
-      folder: `berony/stories`,
-      public_id: `${Date.now()}`,
-      context: { description: description || '' },
-    });
-
-    const story = new Story({
-      userId,
-      username: user.username,
-      fileUrl: uploadResult.secure_url,
-      publicId: uploadResult.public_id,
-      fileType: 'image',
-      description,
-    });
-    await story.save();
-
-    await storyQueue.add(
-      { storyId: story._id, publicId: uploadResult.public_id, resourceType: 'image' },
-      { delay: 24 * 60 * 60 * 1000, attempts: 3 }
+    await pollQueue.add(
+      { pollId: poll._id }, 
+      { delay: 24 * 60 * 60 * 1000 } 
     );
 
-    await redisclient.del(`stories:${userId}`);
-    await redisclient.del(`stories:all`);
-
-    await fs.unlink(tempFilePath);
-
-    res.json({
-      success: true,
-      storyId: story._id,
-      fileUrl: uploadResult.secure_url,
-      publicId: uploadResult.public_id,
-      fileType: 'image',
-    });
+    res.json({ success: true, poll });
   } catch (error) {
-    console.error(`Error generating or uploading ${mediaType}:`, error);
-    res.status(500).json({ success: false, error: error.message });
+    console.error('Error creating poll:', error);
+    res.status(500).json({ success: false, error: 'Internal Server Error' });
   }
 });
+
+
+router.post('/vote', async (req, res) => {
+  const { pollId, optionIndex, userId } = req.body;
+
+  if (!pollId || optionIndex === undefined || !userId) {
+    return res.status(400).json({ success: false, error: 'pollId, optionIndex, and userId are required.' });
+  }
+
+  try {
+    const poll = await Poll.findById(pollId);
+    if (!poll || optionIndex < 0 || optionIndex >= poll.options.length) {
+      return res.status(400).json({ success: false, error: 'Invalid poll or option.' });
+    }
+
+    if (poll.voters.includes(userId)) {
+      return res.status(403).json({ success: false, error: 'You have already voted on this poll.' });
+    }
+
+    poll.votes[optionIndex]++;
+    poll.voters.push(userId);
+    await poll.save();
+
+    res.json({ success: true, poll });
+  } catch (error) {
+    console.error('Error voting on poll:', error);
+    res.status(500).json({ success: false, error: 'Internal Server Error' });
+  }
+
+});
+
+router.get('/polls', async (req, res) => {
+  const { userId } = req.query;
+
+  try {
+    const polls = await Poll.find();
+    const pollsWithVoteStatus = polls.map(poll => ({
+      ...poll.toObject(),
+      hasVoted: userId ? poll.voters.includes(userId) : false,
+    }));
+    res.json({ success: true, polls: pollsWithVoteStatus });
+  } catch (error) {
+    console.error('Error fetching polls:', error);
+    res.status(500).json({ success: false, error: 'Internal Server Error' });
+  }
+});
+
+router.get('/poll/:pollId', async (req, res) => {
+  const { pollId } = req.params; 
+  const { userId } = req.query; 
+
+  try {
+    const poll = await Poll.findById(pollId);
+    if (!poll) {
+      return res.status(404).json({ success: false, error: 'Poll not found' });
+    }
+
+    const pollWithVoteStatus = {
+      ...poll.toObject(),
+      hasVoted: userId ? poll.voters.includes(userId) : false,
+    };
+
+    res.json({ success: true, poll: pollWithVoteStatus });
+  } catch (error) {
+    console.error('Error fetching poll:', error);
+    res.status(500).json({ success: false, error: 'Internal Server Error' });
+  }
+});
+
+router.post('/log-activity', async (req, res) => {
+  const { userId, activityType } = req.body;
+  try {
+    const activity = new UserActivity({
+      userId,
+      activityType,
+      timestamp: new Date(),
+    });
+    await activity.save();
+    res.status(201).json({ message: 'Activity logged' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to log activity' });
+  }
+});
+
+router.get('/contributions/:userId', async (req, res) => {
+  const { userId } = req.params;
+  const oneYearAgo = new Date();
+  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+
+  try {
+    const activities = await UserActivity.aggregate([
+      { $match: { userId: new mongoose.Types.ObjectId(userId), timestamp: { $gte: oneYearAgo } } },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$timestamp' } },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const contributionMap = {};
+    activities.forEach(activity => {
+      contributionMap[activity._id] = activity.count;
+    });
+
+    res.json(contributionMap); // e.g., { "2024-06-05": 3, "2024-06-06": 1, ... }
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch contributions' });
+  }
+});
+
+
+
+// this will run but required billing so i dont have money postponding to future
+// router.post('/generate-story', async (req, res) => {
+//   const { userId, prompt, description, mediaType = 'image' } = req.body;
+
+//   if (!userId || !prompt) {
+//     return res.status(400).json({ success: false, error: 'userId and prompt are required' });
+//   }
+
+//   const user = await User.findOne({ userId });
+//   if (!user) {
+//     return res.status(404).json({ success: false, error: 'User not found' });
+//   }
+
+//   try {
+//     cloudinary.config({
+//       cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+//       api_key: process.env.CLOUDINARY_API_KEY,
+//       api_secret: process.env.CLOUDINARY_API_SECRET,
+//     });
+
+//     const client = new PredictionServiceClient({
+//       project: process.env.GOOGLE_CLOUD_PROJECT,
+//       location: process.env.GOOGLE_CLOUD_LOCATION || 'us-central1',
+//     });
+
+//     // Temporary file path
+//     const tempFilePath = `/tmp/${Date.now()}.png`;
+
+//     // Generate media (image only for now)
+//     if (mediaType !== 'image') {
+//       throw new Error('Only image generation is supported. Use mediaType="image".');
+//     }
+
+//     const endpoint = `projects/${process.env.GOOGLE_CLOUD_PROJECT}/locations/${process.env.GOOGLE_CLOUD_LOCATION}/publishers/google/models/imagegeneration@006`;
+//     const instance = {
+//       prompt: prompt,
+//     };
+//     const parameters = {
+//       sampleCount: 1,
+//       aspectRatio: '1:1',
+//       outputFormat: 'png',
+//     };
+
+//     const [response] = await client.predict({
+//       endpoint,
+//       instance: { structValue: { fields: { prompt: { stringValue: prompt } } } },
+//       parameters: {
+//         structValue: {
+//           fields: {
+//             sampleCount: { numberValue: 1 },
+//             aspectRatio: { stringValue: '1:1' },
+//             outputFormat: { stringValue: 'png' },
+//           },
+//         },
+//       },
+//     });
+
+//     const imageBase64 = response.predictions[0].structValue.fields.bytesBase64Encoded.stringValue;
+//     const imageBuffer = Buffer.from(imageBase64, 'base64');
+//     await fs.writeFile(tempFilePath, imageBuffer);
+
+//     const uploadResult = await cloudinary.uploader.upload(tempFilePath, {
+//       resource_type: 'image',
+//       folder: `berony/stories`,
+//       public_id: `${Date.now()}`,
+//       context: { description: description || '' },
+//     });
+
+//     const story = new Story({
+//       userId,
+//       username: user.username,
+//       fileUrl: uploadResult.secure_url,
+//       publicId: uploadResult.public_id,
+//       fileType: 'image',
+//       description,
+//     });
+//     await story.save();
+
+//     await storyQueue.add(
+//       { storyId: story._id, publicId: uploadResult.public_id, resourceType: 'image' },
+//       { delay: 24 * 60 * 60 * 1000, attempts: 3 }
+//     );
+
+//     await redisclient.del(`stories:${userId}`);
+//     await redisclient.del(`stories:all`);
+
+//     await fs.unlink(tempFilePath);
+
+//     res.json({
+//       success: true,
+//       storyId: story._id,
+//       fileUrl: uploadResult.secure_url,
+//       publicId: uploadResult.public_id,
+//       fileType: 'image',
+//     });
+//   } catch (error) {
+//     console.error(`Error generating or uploading ${mediaType}:`, error);
+//     res.status(500).json({ success: false, error: error.message });
+//   }
+// });
+
+
+
 // ​http://localhost:3000/api/generate-story
 // {
 //   "userId": "",
@@ -1162,10 +1372,6 @@ router.post('/generate-story', async (req, res) => {
 //   "description": "A beautiful cityscape for a user story",
 //   "mediaType": "image"
 // }
-
-
-
-
 
 const initializeScheduledPosts = async () => {
   try {
