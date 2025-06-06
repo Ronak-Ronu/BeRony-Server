@@ -235,6 +235,8 @@ app.get('/api/chat/:roomId', async (req, res) => {
     res.status(500).json({ message: 'Internal Server Error', error: error.message });
   }
 });
+
+
 io.use(async (socket, next) => {
   const { userId, username, postId } = socket.handshake.auth;
   console.log('Socket.io auth:', { userId, username });
@@ -329,11 +331,12 @@ io.on('connection', (socket) => {
     console.log(`User ${socket.username} (${socket.id}) left room: ${roomId}`);
   });
 
-  socket.on('textChange', (text) => {
-    console.log(`Text change received for post ${socket.postId}:`, text); 
-    socket.to(socket.postId).emit('textChange', text); 
+  socket.on('textChange', ({ text, senderId }) => {
+    const payload = { text, senderId };
+    socket.to(socket.postId).emit('textChange', payload);
     redisPublisher.publish(channel, JSON.stringify({ postId: socket.postId, text }));
   });
+  
 
   socket.on('startEditing', (username) => {
     console.log(`Broadcasting startEditing for user: ${username} to room: ${socket.postId}`);
@@ -344,14 +347,15 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('canvasUpdate', data);
   });
 
-  socket.on('cursorMove', ({ position }) => {
-    console.log(`Received cursorMove from user ${socket.username} at position ${position}`);
-    socket.to(socket.postId).emit('cursorUpdate', {
-      userId: socket.userId,
-      username: socket.username,
-      position
-    });
+socket.on('cursorMove', ({ position }) => {
+  socket.to(socket.postId).emit('cursorUpdate', {
+    userId: socket.userId,
+    socketId: socket.id,
+    username: socket.username,
+    position
   });
+});
+
 
   socket.on('joinPostRoom', (postId) => {
     socket.postId = postId; // Set postId on the socket
@@ -382,7 +386,7 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.username, 'ID:', socket.userId);
-    socket.to(socket.postId).emit('cursorRemove', { userId: socket.userId });
+    socket.to(socket.postId).emit('cursorRemove', { socketId: socket.id });
   });
 });
 
