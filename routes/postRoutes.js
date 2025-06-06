@@ -1221,6 +1221,9 @@ router.get('/poll/:pollId', async (req, res) => {
 router.post('/log-activity', async (req, res) => {
   const { userId, activityType } = req.body;
   try {
+    if (!userId || !activityType) {
+      return res.status(400).json({ error: 'userId and activityType are required' });
+    }
     const activity = new UserActivity({
       userId,
       activityType,
@@ -1229,18 +1232,21 @@ router.post('/log-activity', async (req, res) => {
     await activity.save();
     res.status(201).json({ message: 'Activity logged' });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to log activity' });
+    console.error('Error logging activity:', error.message);
+    res.status(500).json({ error: 'Failed to log activity', details: error.message });
   }
 });
 
 router.get('/contributions/:userId', async (req, res) => {
   const { userId } = req.params;
+  console.log('Received userId:', req.params.userId);
   const oneYearAgo = new Date();
   oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
 
   try {
     const activities = await UserActivity.aggregate([
-      { $match: { userId: new mongoose.Types.ObjectId(userId), timestamp: { $gte: oneYearAgo } } },
+      // { $match: { userId: new mongoose.Types.ObjectId(userId), timestamp: { $gte: oneYearAgo } } },
+      { $match: { userId: userId, timestamp: { $gte: oneYearAgo } } }, 
       {
         $group: {
           _id: { $dateToString: { format: '%Y-%m-%d', date: '$timestamp' } },
