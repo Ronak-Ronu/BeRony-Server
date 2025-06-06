@@ -120,46 +120,6 @@ const chatUpload = multer({
   }
 });
 
-const chatCleanupQueue = new Bull('chat-cleanup-queue', {
-  redis: {
-    host: process.env.REDIS_HOST,
-    port: process.env.REDIS_PORT,
-    password: process.env.REDIS_PASSWORD
-  }});
-
-chatCleanupQueue.process(async () => {
-  try {
-    const rooms = await ChatMessage.distinct('roomId');
-    for (const roomId of rooms) {
-      const chatCount = await ChatMessage.countDocuments({ roomId });
-      if (chatCount > 40) {
-        const chatsToDelete = await ChatMessage.find({ roomId })
-          .sort({ createdAt: 1 })
-          .limit(chatCount - 30);
-        const chatIds = chatsToDelete.map(chat => chat._id);
-        await ChatMessage.deleteMany({ _id: { $in: chatIds } });
-        console.log(`Deleted ${chatIds.length} old chats from room ${roomId}`);
-      }
-    }
-  } catch (error) {
-    console.error('Error in chat cleanup:', error);
-  }
-});
-
-chatCleanupQueue.add({}, {
-  repeat: { every: 60 * 1000 },
-  attempts: 3
-}).then(() => {
-  console.log('Chat cleanup job scheduled');
-});
-
-chatCleanupQueue.on('error', (error) => {
-  console.error('Chat cleanup queue error:', error);
-});
-chatCleanupQueue.on('failed', (job, error) => {
-  console.error(`Chat cleanup job ${job.id} failed:`, error);
-});
-
 app.get('/api/chat/rooms', async (req, res) => {
   const cacheKey = 'chat:rooms';
   console.log('GET /api/chat/rooms received');
