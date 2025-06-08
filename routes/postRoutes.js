@@ -851,16 +851,17 @@ router.post('/:currentuserid/:method/:userid', async (req, res) => {
 
 }
 );
-router.get('/sitemap.xml',async (req,res)=>{
+
+
+router.get('/sitemap.xml', async (req, res) => {
   try {
     const posts = await Post.find({});
     let sitemap = `<?xml version="1.0" encoding="UTF-8"?>
       <urlset
-      xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
-      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-      xsi:schemaLocation="http://www.sitemaps.org/schemas/sitemap/0.9
-            http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd">
-
+        xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.sitemaps.org/schemas/sitemap/0.9
+              http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd">
       <url>
         <loc>https://berony.web.app</loc>
         <lastmod>${new Date().toISOString()}</lastmod>
@@ -873,7 +874,6 @@ router.get('/sitemap.xml',async (req,res)=>{
         <changefreq>daily</changefreq>
         <priority>0.8</priority>
       </url>
-
       <url>
         <loc>https://berony.web.app/whosrony</loc>
         <lastmod>${new Date().toISOString()}</lastmod>
@@ -886,33 +886,31 @@ router.get('/sitemap.xml',async (req,res)=>{
         <changefreq>daily</changefreq>
         <priority>0.9</priority>
       </url>
-      <url>
-        <loc>https://berony.web.app/blogreel</loc>
-        <lastmod>${new Date().toISOString()}</lastmod>
-        <changefreq>daily</changefreq>
-        <priority>0.9</priority>
-      </url>
     `;
 
-    posts.forEach((post)=>{
-      sitemap+=`
-      <url>
-        <loc>https://berony.web.app/blog/${post._id}</loc>
-        <lastmod>${new Date(post.createdAt).toISOString()}</lastmod>
-        <changefreq>weekly</changefreq>
-        <priority>0.9</priority>
-      </url>
+    for (const post of posts) {
+      const slug = post.title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
+      sitemap += `
+        <url>
+          <loc>https://berony.web.app/blog/${post._id}/${slug}</loc>
+          <lastmod>${new Date(post.createdAt).toISOString()}</lastmod>
+          <changefreq>weekly</changefreq>
+          <priority>0.9</priority>
+        </url>
+      `;
+    }
 
-      `
-    })
     sitemap += `</urlset>`;
-    res.header("Content-Type", "application/xml");
+    res.header('Content-Type', 'application/xml');
     res.send(sitemap);
-} catch (error) {
+  } catch (error) {
+    console.error('Error generating sitemap:', error);
     res.status(500).json({ message: error.message });
-    
   }
-})
+});
 
 router.get("/items", async (req, res) => {
   try {
@@ -1067,7 +1065,6 @@ router.get('/stories/:id', async (req, res) => {
   }
 });
 
-
 router.get('/users/:userId/suggestions', async (req, res) => {
   const { userId } = req.params;
 
@@ -1077,13 +1074,13 @@ router.get('/users/:userId/suggestions', async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    const visited = new Set(); 
-    const queue = [userId]; 
-    const suggestions = new Map(); // Store suggestion scores (userId -> score)
+    const visited = new Set();
+    const queue = [userId];
+    const suggestions = new Map();
     visited.add(userId);
 
     let level = 0;
-    while (queue.length > 0 && level < 2) { 
+    while (queue.length > 0 && level < 2) {
       const levelSize = queue.length;
       for (let i = 0; i < levelSize; i++) {
         const currentUserId = queue.shift();
@@ -1104,21 +1101,52 @@ router.get('/users/:userId/suggestions', async (req, res) => {
       level++;
     }
 
-    const suggestionList = Array.from(suggestions.entries())
-      .map(([userId, score]) => ({ userId, score }))
-      .sort((a, b) => b.score - a.score); // Higher score = more mutual connections
+    let result = [];
 
-    // Fetch user details for suggestions
-    const suggestionUsers = await User.find({ userId: { $in: suggestionList.map(s => s.userId) } })
-      .select('userId username userBio userEmail');
-    
-    const result = suggestionUsers.map(user => ({
-      userId: user.userId,
-      username: user.username,
-      userBio: user.userBio,
-      userEmail: user.userEmail,
-      score: suggestionList.find(s => s.userId === user.userId).score,
-    }));
+    if (suggestions.size > 0) {
+      const suggestionList = Array.from(suggestions.entries())
+        .map(([userId, score]) => ({ userId, score }))
+        .sort((a, b) => b.score - a.score); 
+
+      const suggestionUsers = await User.find({ userId: { $in: suggestionList.map(s => s.userId) } })
+        .select('userId username userBio userEmail');
+
+      result = suggestionUsers.map(user => ({
+        userId: user.userId,
+        username: user.username,
+        userBio: user.userBio,
+        userEmail: user.userEmail,
+        score: suggestionList.find(s => s.userId === user.userId).score,
+      }));
+    } else {
+      // Fallback to find the most popular users (based on number of followers)
+      const popularUsers = await User.aggregate([
+        {
+          $project: {
+            userId: 1,
+            username: 1,
+            userBio: 1,
+            userEmail: 1,
+            followerCount: { $size: { $ifNull: ['$followers', []] } }, 
+          },
+        },
+        { $sort: { followerCount: -1 } }, 
+        { $limit: 15 }, 
+      ]);
+
+      if (popularUsers.length === 0) {
+        return res.json([]); 
+      }
+
+      result = popularUsers.map(user => ({
+        userId: user.userId,
+        username: user.username,
+        userBio: user.userBio,
+        userEmail: user.userEmail,
+        score: 0,
+        followerCount: user.followerCount,
+      }));
+    }
 
     res.json(result);
   } catch (error) {
