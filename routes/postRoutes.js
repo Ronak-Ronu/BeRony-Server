@@ -249,6 +249,7 @@ router.get('/posts', async (req, res) => {
     res.status(500).json({ message: 'Internal Server Error' });
   }
 });
+
 router.get('/findpost', async (req, res) => {
   const { q: query = '', tags: tag = '', start = 0, limit = 3 } = req.query;
 
@@ -256,42 +257,58 @@ router.get('/findpost', async (req, res) => {
     let posts = [];
     let users = [];
 
+    const startIndex = parseInt(start) || 0;
+    const limitCount = parseInt(limit) || 3;
+
     if (tag) {
-      posts = await Post.find({ tags: tag })
+      // Search posts by tag (case-insensitive)
+      posts = await Post.find({ tags: { $regex: tag, $options: 'i' } })
         .sort({ createdAt: -1 })
-        .skip(parseInt(start))
-        .limit(parseInt(limit));
+        .skip(startIndex)
+        .limit(limitCount);
+
+      users = await User.find({
+        $or: [
+          { tags: { $regex: tag, $options: 'i' } },
+          { username: { $regex: tag, $options: 'i' } },
+        ],
+      }).limit(5);
     } else if (query) {
       const decodedQuery = decodeURIComponent(query.trim());
-      const searchWords = decodedQuery.split(/\s+/);
 
-      const searchConditions = searchWords.map((word) => ({
-        $or: [
-          { title: { $regex: word, $options: 'i' } }, // 'i' makes it case-insensitive
-          { bodyofcontent: { $regex: word, $options: 'i' } },
-          { tags: { $regex: tag, $options: 'i' } }
-        ],
-      }));
+      posts = await Post.find(
+        { $text: { $search: decodedQuery } },
+        { score: { $meta: 'textScore' } } 
+      )
+        .sort({ score: { $meta: 'textScore' } })
+        .skip(startIndex)
+        .limit(limitCount);
 
-      posts = await Post.find({ $and: searchConditions }).sort({ createdAt: -1 });
+      if (posts.length === 0) {
+        posts = await Post.find({
+          title: { $regex: decodedQuery, $options: 'i' },
+        })
+          .sort({ createdAt: -1 })
+          .skip(startIndex)
+          .limit(limitCount);
+      }
 
-      // Search for users
-      const userSearchConditions = searchWords.map((word) => ({
-        username: { $regex: word, $options: 'i' },
-      }));
-
-      users = await User.find({ $or: userSearchConditions });
+      users = await User.find({
+        username: { $regex: decodedQuery, $options: 'i' },
+      }).limit(5);
     } else {
-      posts = await Post.find().sort({ createdAt: -1 });
+      posts = await Post.find()
+        .sort({ createdAt: -1 })
+        .skip(startIndex)
+        .limit(limitCount);
     }
 
     res.json({ posts, users });
   } catch (error) {
-    console.error('Error fetching query posts or users:', error);
-    res.status(500).json({ message: 'Internal Server Error' });
+    console.error('Error during search:', error);
+    res.status(500).json({ message: 'Internal Server Error', error: error.message });
   }
 });
-
 
 
 router.get('/posts/:id', async (req, res) => {
