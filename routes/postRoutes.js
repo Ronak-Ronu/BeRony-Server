@@ -249,7 +249,7 @@ router.get('/posts', async (req, res) => {
     res.status(500).json({ message: 'Internal Server Error' });
   }
 });
-
+// routes/posts.js
 router.get('/findpost', async (req, res) => {
   const { q: query = '', tags: tag = '', start = 0, limit = 3 } = req.query;
 
@@ -261,24 +261,24 @@ router.get('/findpost', async (req, res) => {
     const limitCount = parseInt(limit) || 3;
 
     if (tag) {
-      // Search posts by tag (case-insensitive)
+      // Search posts by tag
       posts = await Post.find({ tags: { $regex: tag, $options: 'i' } })
         .sort({ createdAt: -1 })
         .skip(startIndex)
         .limit(limitCount);
 
-      users = await User.find({
+      users = await User.find({ 
         $or: [
-          { tags: { $regex: tag, $options: 'i' } },
           { username: { $regex: tag, $options: 'i' } },
-        ],
+          { userBio: { $regex: tag, $options: 'i' } }
+        ] 
       }).limit(5);
     } else if (query) {
       const decodedQuery = decodeURIComponent(query.trim());
 
       posts = await Post.find(
         { $text: { $search: decodedQuery } },
-        { score: { $meta: 'textScore' } } 
+        { score: { $meta: 'textScore' } }
       )
         .sort({ score: { $meta: 'textScore' } })
         .skip(startIndex)
@@ -286,16 +286,32 @@ router.get('/findpost', async (req, res) => {
 
       if (posts.length === 0) {
         posts = await Post.find({
-          title: { $regex: decodedQuery, $options: 'i' },
+          $or: [
+            { title: { $regex: decodedQuery, $options: 'i' } },
+            { bodyofcontent: { $regex: decodedQuery, $options: 'i' } },
+            { tags: { $regex: decodedQuery, $options: 'i' } }
+          ]
         })
           .sort({ createdAt: -1 })
           .skip(startIndex)
           .limit(limitCount);
       }
 
-      users = await User.find({
-        username: { $regex: decodedQuery, $options: 'i' },
-      }).limit(5);
+      users = await User.find(
+        { $text: { $search: decodedQuery } },
+        { score: { $meta: 'textScore' } }
+      )
+        .sort({ score: { $meta: 'textScore' } })
+        .limit(5);
+      
+      if (users.length === 0) {
+        users = await User.find({
+          $or: [
+            { username: { $regex: decodedQuery, $options: 'i' } },
+            { userBio: { $regex: decodedQuery, $options: 'i' } }
+          ]
+        }).limit(5);
+      }
     } else {
       posts = await Post.find()
         .sort({ createdAt: -1 })
@@ -309,6 +325,68 @@ router.get('/findpost', async (req, res) => {
     res.status(500).json({ message: 'Internal Server Error', error: error.message });
   }
 });
+// router.get('/findpost', async (req, res) => {
+//   const { q: query = '', tags: tag = '', start = 0, limit = 3 } = req.query;
+
+//   try {
+//     let posts = [];
+//     let users = [];
+
+//     const startIndex = parseInt(start) || 0;
+//     const limitCount = parseInt(limit) || 3;
+
+//     if (tag) {
+//       posts = await Post.find({ tags: { $regex: tag, $options: 'i' } })
+//         .sort({ createdAt: -1 })
+//         .skip(startIndex)
+//         .limit(limitCount);
+
+//       users = await User.find({
+//         $or: [
+//           { username: { $regex: tag, $options: 'i' } },
+//           { userBio: { $regex: tag, $options: 'i' } }
+//         ],
+//       }).limit(5);
+//     } else if (query) {
+//       const decodedQuery = decodeURIComponent(query.trim());
+
+//       posts = await Post.find(
+//         { $text: { $search: decodedQuery } },
+//         { score: { $meta: 'textScore' } } 
+//       )
+//         .sort({ score: { $meta: 'textScore' } })
+//         .skip(startIndex)
+//         .limit(limitCount);
+
+//       if (posts.length === 0) {
+//         posts = await Post.find({
+//           $or: [
+//             { title: { $regex: decodedQuery, $options: 'i' } },
+//             { bodyofcontent: { $regex: decodedQuery, $options: 'i' } },
+//             { tags: { $regex: decodedQuery, $options: 'i' } }
+//           ]
+//         })
+//           .sort({ createdAt: -1 })
+//           .skip(startIndex)
+//           .limit(limitCount);
+//       }
+
+//       users = await User.find({
+//         username: { $regex: decodedQuery, $options: 'i' },
+//       }).limit(5);
+//     } else {
+//       posts = await Post.find()
+//         .sort({ createdAt: -1 })
+//         .skip(startIndex)
+//         .limit(limitCount);
+//     }
+
+//     res.json({ posts, users });
+//   } catch (error) {
+//     console.error('Error during search:', error);
+//     res.status(500).json({ message: 'Internal Server Error', error: error.message });
+//   }
+// });
 
 
 router.get('/posts/:id', async (req, res) => {
