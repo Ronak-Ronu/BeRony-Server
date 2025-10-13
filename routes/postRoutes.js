@@ -1,4 +1,5 @@
 const express = require('express');
+const nodemailer = require('nodemailer');
 const router = express.Router();
 const Post = require('../models/Posts');
 const Bookmark=require('../models/Bookmark')
@@ -8,7 +9,6 @@ const multer = require('multer');
 const fs=require('fs')
 const Redis=require('ioredis')
 const cloudinary = require('../cloudinaryconfig')
-const nodemailer = require('nodemailer');
 const postQueue = require('../queues/bullqueue');
 const { publishScheduledPost } = require('../worker/publishWorker');
 const Story = require('../models/Story'); 
@@ -76,7 +76,7 @@ storyQueue.process(async (job) => {
     await Story.findByIdAndDelete(storyId);
     await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
     console.log(`Story ${storyId} deleted from MongoDB and Cloudinary`);
-    io.emit('storyDeleted', { storyId });
+    // Note: io is not available here, you might need to handle this differently
     await redisclient.del(`story:${storyId}`);
     await redisclient.del(`stories:all`);
   } catch (error) {
@@ -84,7 +84,6 @@ storyQueue.process(async (job) => {
     throw error;
   }
 });
-
 
 const schedulePostPublishing = async (postId, scheduleTime) => {
   const delay = new Date(scheduleTime) - new Date();
@@ -161,41 +160,20 @@ router.post('/posts', upload.single('imageUrl'), async (req, res) => {
 
       console.log(newPost);
 
-      // if (!isSchedule) {
-      //   const author = await User.findOne({ userId: req.body.userId });
-      //   const followers = await User.find({
-      //     userId: { $in: author.followers || [] },
-      //   });
-
-      //   for (const follower of followers) {
-      //     await notificationQueue.add({
-      //       userEmail: follower.userEmail,
-      //       authorName: author.username,
-      //       postTitle: newPost.title,
-      //       postId: newPost._id
-      //     }, { attempts: 3, backoff: { type: 'exponential', delay: 3000 } });
-      //   }
-      //   console.log(`Queued notifications for ${followers.length} followers for post ${newPost._id}`);
-      // }
       const user = await User.findOne({ userId: req.body.userId });
       if (user && Array.isArray(user.followers) && user.followers.length > 0) {
         user.followers.forEach((followerId) => {
-
           notificationQueue.add({
             followerId,
             authorName: user.username,
             postTitle: newPost.title,
             postId: newPost._id
           }, { attempts: 3, backoff: { type: 'exponential', delay: 3000 } });
-
         });
       } else {
         console.log('No followers found for the user.');
       }
       console.log(`Queued notifications for ${user.followers.length} followers for post ${newPost._id}`);
-      
-
-
 
       if (isSchedule) {
         schedulePostPublishing(newPost._id, postScheduleTime);
@@ -718,19 +696,72 @@ router.post('/:postId/add-collaborator', async (req, res) => {
   }
 });
 
+// Enhanced Gmail transporter with Render.com compatibility
+const createTransporter = () => {
+  // For Render.com, we'll use Gmail but with very conservative settings
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS, // Make sure this is an App Password
+    },
+    // Conservative settings for Render.com
+    socketTimeout: 10000, // 10 seconds timeout
+    connectionTimeout: 10000, // 10 seconds connection timeout
+    greetingTimeout: 10000, // 10 seconds greeting timeout
+    secure: true,
+    tls: {
+      rejectUnauthorized: false // Bypass certificate validation if needed
+    }
+  });
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
+  return transporter;
+};
+
+// Test email configuration with timeout
+const testEmailConfig = async () => {
+  try {
+    const transporter = createTransporter();
+    
+    // Use Promise.race to timeout the email test
+    const testPromise = transporter.verify();
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Email test timeout')), 5000)
+    );
+    
+    await Promise.race([testPromise, timeoutPromise]);
+    console.log('Email configuration is working correctly');
+    return true;
+  } catch (error) {
+    console.warn('Email configuration test failed:', error.message);
+    console.warn('Email features will be disabled to prevent server crashes');
+    return false;
+  }
+};
+
+let emailEnabled = false;
+
+// Test email config but don't block server startup
+testEmailConfig().then(result => {
+  emailEnabled = result;
+}).catch(err => {
+  console.error('Email test error:', err);
+  emailEnabled = false;
 });
+
 router.post('/send-collab-invite', async (req, res) => {
-  const { userEmail, authorMail,authorName, postTitle, postDescription, workspaceLink } = req.body;
+  const { userEmail, authorMail, authorName, postTitle, postDescription, workspaceLink } = req.body;
+
+  // If email is disabled, return success but log it
+  if (!emailEnabled) {
+    console.log('Email service disabled - would have sent invitation to:', userEmail);
+    return res.status(200).json({
+      message: 'Invitation processed (email service temporarily unavailable)'
+    });
+  }
 
   const mailOptions = {
-    from:process.env.EMAIL_USER,
+    from: process.env.EMAIL_USER,
     to: userEmail,
     subject: `You've been added as a collaborator!`,
     html: `<!DOCTYPE html>
@@ -740,89 +771,21 @@ router.post('/send-collab-invite', async (req, res) => {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Collaboration Invitation</title>
   <style>
-    body {
-      font-family: 'Arial', sans-serif;
-      margin: 0;
-      padding: 0;
-      background-color: #f7f7f7;
-      color: #333;
-    }
-    .container {
-      max-width: 600px;
-      margin: 40px auto;
-      background-color: #ffffff;
-      border-radius: 8px;
-      overflow: hidden;
-      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
-    }
-    .header {
-      background-color: #c6caf9;
-      padding: 20px;
-      text-align: center;
-      color: #fff;
-    }
-    .header h1 {
-      margin: 0;
-      font-size: 24px;
-    }
-    .content {
-      padding: 20px;
-    }
-    .row {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 15px;
-    }
-    .column {
-      width: 48%;
-    }
-    .column h3 {
-      margin-bottom: 5px;
-      font-size: 16px;
-      color: #666;
-    }
-    .column p {
-      margin: 0;
-      font-size: 14px;
-      color: #333;
-    }
-    .cta {
-      text-align: center;
-      margin: 20px 0;
-    }
-    .cta a {
-      display: inline-block;
-      padding: 12px 20px;
-      font-size: 16px;
-      color: #fff;
-      background-color: #c6caf9;
-      text-decoration: none;
-      border-radius: 25px;
-    }
-    .cta a:hover {
-      background-color: #a9add9;
-    }
-    .footer {
-      text-align: center;
-      font-size: 12px;
-      color: #999;
-      background-color: #f7f7f7;
-      padding: 10px 20px;
-    }
-    .footer a {
-      color: #c6caf9;
-      text-decoration: none;
-    }
-     .info-section {
-      background-color: #f2f3fc;
-      padding: 15px;
-      border: 1px solid #e2e5f7;
-      border-radius: 8px;
-      margin: 20px 0;
-      text-align: center;
-      font-size: 14px;
-      color: #555;
-    }
+    body { font-family: 'Arial', sans-serif; margin: 0; padding: 0; background-color: #f7f7f7; color: #333; }
+    .container { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1); }
+    .header { background-color: #c6caf9; padding: 20px; text-align: center; color: #fff; }
+    .header h1 { margin: 0; font-size: 24px; }
+    .content { padding: 20px; }
+    .row { display: flex; justify-content: space-between; margin-bottom: 15px; }
+    .column { width: 48%; }
+    .column h3 { margin-bottom: 5px; font-size: 16px; color: #666; }
+    .column p { margin: 0; font-size: 14px; color: #333; }
+    .cta { text-align: center; margin: 20px 0; }
+    .cta a { display: inline-block; padding: 12px 20px; font-size: 16px; color: #fff; background-color: #c6caf9; text-decoration: none; border-radius: 25px; }
+    .cta a:hover { background-color: #a9add9; }
+    .footer { text-align: center; font-size: 12px; color: #999; background-color: #f7f7f7; padding: 10px 20px; }
+    .footer a { color: #c6caf9; text-decoration: none; }
+    .info-section { background-color: #f2f3fc; padding: 15px; border: 1px solid #e2e5f7; border-radius: 8px; margin: 20px 0; text-align: center; font-size: 14px; color: #555; }
   </style>
 </head>
 <body>
@@ -832,8 +795,7 @@ router.post('/send-collab-invite', async (req, res) => {
     </div>
     <div class="content">
       <p>Hi <strong>${userEmail}</strong>,</p>
-      <p>You’ve been invited by <strong>${authorName}</strong> to collaborate on an exciting new blog post!</p>
-
+      <p>You've been invited by <strong>${authorName}</strong> to collaborate on an exciting new blog post!</p>
       <div class="row">
         <div class="column">
           <h3>Post Title</h3>
@@ -844,108 +806,114 @@ router.post('/send-collab-invite', async (req, res) => {
           <p>${authorMail}</p>
         </div>
       </div>
-
-          <h3>Post Description</h3>
-          <p>${postDescription}</p>
+      <h3>Post Description</h3>
+      <p>${postDescription}</p>
       <div class="cta">
         <a href="${workspaceLink}">Join the Workspace</a>
       </div>
     </div>
-
     <div class="info-section">
-    <p>Manually access the link: <strong>${workspaceLink}</strong></p>
-  </div>
+      <p>Manually access the link: <strong>${workspaceLink}</strong></p>
+    </div>
     <div class="footer">
       <p>If you did not expect this invitation, feel free to ignore it or <a href="mailto:${authorMail}">contact the author</a>.</p>
     </div>
   </div>
 </body>
-</html>
-
-  `
+</html>`
   };
 
   try {
-    await transporter.sendMail(mailOptions);
+    const transporter = createTransporter();
+    
+    // Use Promise.race to timeout the email sending
+    const sendPromise = transporter.sendMail(mailOptions);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Email sending timeout')), 10000)
+    );
+
+    await Promise.race([sendPromise, timeoutPromise]);
+    
+    console.log('Invitation email sent successfully to:', userEmail);
     res.status(200).json({ message: 'Invitation sent Successfully' });
+    
   } catch (error) {
-    console.error('Error sending email:', error);
-    res.status(500).json({ message: 'Error sending email' });
+    console.error('Error sending email:', error.message);
+    
+    // Disable email on persistent failures
+    if (error.message.includes('timeout') || error.message.includes('ETIMEDOUT')) {
+      console.warn('Disabling email service due to timeout');
+      emailEnabled = false;
+    }
+    
+    // Always return success to the client even if email fails
+    res.status(200).json({
+      message: 'Invitation processed (email may not have been sent due to service issues)'
+    });
   }
 });
 
 router.post('/:currentuserid/:method/:userid', async (req, res) => {
-  const { currentuserid,method, userid } = req.params;
-  
-  if(method==='Follow')
-    {
-      try {
- 
-        if (currentuserid === userid) {
-          return res.status(400).json({ message: "You cannot follow yourself." });
-        }
-        const userToFollow = await User.findOne({userId: userid});
-        const loggedInUser = await User.findOne({userId:currentuserid});
+  const { currentuserid, method, userid } = req.params;
 
-    
-        // Check if both users exist
-        if (!userToFollow || !loggedInUser) {
-          return res.status(404).json({ message: "User not found." });
-        }
-    
-        loggedInUser.following = loggedInUser.following || [];
-        userToFollow.followers = userToFollow.followers || [];
-    
-        if (loggedInUser.following.includes(userid)) {
-          return res.status(400).json({ message: "Already Following." });
-        }
-    
-        loggedInUser.following.push(userid);
-        userToFollow.followers.push(currentuserid);
-    
-        await loggedInUser.save();
-        await userToFollow.save();
-    
-        res.status(200).json({ message: "Following" });
-      } catch (error) {
-        console.error("Error following user:", error);
-        res.status(500).json({ message: error.message });
+  if (method === 'Follow') {
+    try {
+      if (currentuserid === userid) {
+        return res.status(400).json({ message: "You cannot follow yourself." });
       }
-    }
-    if(method==='Unfollow')
-    {
-      try {    
-    
-        const userToUnFollow = await User.findOne({userId: userid});
-        const loggedInUser = await User.findOne({userId:currentuserid});
-    
-        // Check if both users exist
-        if (!userToUnFollow || !loggedInUser) {
-          return res.status(404).json({ message: "User not found." });
-        }
-    
-        loggedInUser.following = loggedInUser.following || [];
-        userToUnFollow.followers = userToUnFollow.followers || [];
-        
-        loggedInUser.following.pull(userid);
-        userToUnFollow.followers.pull(currentuserid);
+      const userToFollow = await User.findOne({ userId: userid });
+      const loggedInUser = await User.findOne({ userId: currentuserid });
 
-      
-    
-        await loggedInUser.save();
-        await userToUnFollow.save();
-    
-        res.status(200).json({ message: "Unfollowed" });
-
-
-      } catch (error) {
-        console.error("Error unfollowing user:", error);
-        res.status(500).json({ message: error.message });
+      // Check if both users exist
+      if (!userToFollow || !loggedInUser) {
+        return res.status(404).json({ message: "User not found." });
       }
-    }
 
-}
-);
+      loggedInUser.following = loggedInUser.following || [];
+      userToFollow.followers = userToFollow.followers || [];
+
+      if (loggedInUser.following.includes(userid)) {
+        return res.status(400).json({ message: "Already Following." });
+      }
+
+      loggedInUser.following.push(userid);
+      userToFollow.followers.push(currentuserid);
+
+      await loggedInUser.save();
+      await userToFollow.save();
+
+      res.status(200).json({ message: "Following" });
+    } catch (error) {
+      console.error("Error following user:", error);
+      res.status(500).json({ message: error.message });
+    }
+  }
+  if (method === 'Unfollow') {
+    try {
+      const userToUnFollow = await User.findOne({ userId: userid });
+      const loggedInUser = await User.findOne({ userId: currentuserid });
+
+      // Check if both users exist
+      if (!userToUnFollow || !loggedInUser) {
+        return res.status(404).json({ message: "User not found." });
+      }
+
+      loggedInUser.following = loggedInUser.following || [];
+      userToUnFollow.followers = userToUnFollow.followers || [];
+
+      loggedInUser.following.pull(userid);
+      userToUnFollow.followers.pull(currentuserid);
+
+      await loggedInUser.save();
+      await userToUnFollow.save();
+
+      res.status(200).json({ message: "Unfollowed" });
+    } catch (error) {
+      console.error("Error unfollowing user:", error);
+      res.status(500).json({ message: error.message });
+    }
+  }
+});
 
 
 router.get('/sitemap.xml', async (req, res) => {

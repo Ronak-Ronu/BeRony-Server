@@ -25,6 +25,7 @@
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^6.9.16",
     "openai": "^4.82.0",
+    "prerender-node": "^3.8.0",
     "sentence-tokenizer": "^1.0.1",
     "socket.io": "^4.8.1"
   }

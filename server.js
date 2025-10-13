@@ -14,20 +14,34 @@ const askronyai = require('./routes/askronyai');
 const multer = require('multer');
 const Bull = require('bull');
 const cloudinary = require('./cloudinaryconfig')
-
+const prerender = require('prerender-node');
 require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
 
+// Enhanced error handling for uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  // Don't exit the process in production, let it continue
+  if (process.env.NODE_ENV === 'development') {
+    process.exit(1);
+  }
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 const io = socketIo(server, {
   cors: {
     origin: '*',
     methods: ['GET', 'POST'],
-    // allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true
   },
   transports: ['websocket', 'polling'],
+  pingTimeout: 60000,
+  pingInterval: 25000
 });
 
 app.use(cors({
@@ -36,12 +50,22 @@ app.use(cors({
   credentials: true
 }));
 
-
+prerender.set('prerenderServiceUrl', 'https://service.prerender.io/'); 
+prerender.set('crawlerUserAgents', [
+  'googlebot',
+  'bingbot',
+  'yandex',
+  'baiduspider',
+  'facebookexternalhit',
+  'twitterbot',
+  'linkedinbot',
+]);
 
 app.use(bodyParser.json({ limit: '50mb' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(helmet());
+app.use(prerender.set('prerenderToken', process.env.PRERENDER_TOKEN));
 
 app.use((req, res, next) => {
   res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self';");
@@ -51,30 +75,52 @@ app.use((req, res, next) => {
   next();
 });
 
-mongoose.connect(process.env.MONGO_URI )
-  .then(() => console.log('MongoDB connected'))
-  .catch((err) => console.error('MongoDB connection error:', err));
+// MongoDB connection with retry logic
+const connectDB = async () => {
+  try {
+    await mongoose.connect(process.env.MONGO_URI, {
+      serverSelectionTimeoutMS: 30000,
+      socketTimeoutMS: 45000,
+    });
+    console.log('MongoDB connected');
+  } catch (err) {
+    console.error('MongoDB connection error:', err);
+    // Retry connection after 5 seconds
+    setTimeout(connectDB, 5000);
+  }
+};
+
+connectDB();
 
 const redisConfig = {
   host: process.env.REDIS_HOST || 'localhost',
   port: process.env.REDIS_PORT || 6379,
-  password: process.env.REDIS_PASSWORD || undefined
+  password: process.env.REDIS_PASSWORD || undefined,
+  retryDelayOnFailover: 100,
+  maxRetriesPerRequest: 3,
+  lazyConnect: true
 };
-
 
 const redisSubscriber = new Redis(redisConfig);
 const redisPublisher = new Redis(redisConfig);
 
+// Handle Redis connection errors gracefully
 redisSubscriber.on('error', (err) => console.error('Redis Subscriber Error:', err));
 redisPublisher.on('error', (err) => console.error('Redis Publisher Error:', err));
+
+redisSubscriber.on('connect', () => console.log('Redis Subscriber connected'));
+redisPublisher.on('connect', () => console.log('Redis Publisher connected'));
 
 const channel = 'textChannel';
 redisSubscriber.subscribe(channel);
 
 redisSubscriber.on('message', (channel, message) => {
-  // console.log('Redis message received:', message);
-  const { postId, text } = JSON.parse(message);
-  io.to(postId).emit('textChange', text);
+  try {
+    const { postId, text } = JSON.parse(message);
+    io.to(postId).emit('textChange', text);
+  } catch (error) {
+    console.error('Error processing Redis message:', error);
+  }
 });
 
 cloudinary.config({
@@ -120,6 +166,7 @@ const chatUpload = multer({
   }
 });
 
+// Chat routes remain the same...
 app.get('/api/chat/rooms', async (req, res) => {
   const cacheKey = 'chat:rooms';
   console.log('GET /api/chat/rooms received');
@@ -196,45 +243,54 @@ app.get('/api/chat/:roomId', async (req, res) => {
   }
 });
 
-
+// Socket.io with better error handling
 io.use(async (socket, next) => {
-  const { userId, username, postId } = socket.handshake.auth;
-  console.log('Socket.io auth:', { userId, username });
-  if (!userId || !username) {
-    console.error('Socket.io auth failed: Missing userId or username');
-    return next(new Error('Authentication error'));
+  try {
+    const { userId, username, postId } = socket.handshake.auth;
+    console.log('Socket.io auth:', { userId, username });
+    if (!userId || !username) {
+      console.error('Socket.io auth failed: Missing userId or username');
+      return next(new Error('Authentication error'));
+    }
+    socket.userId = userId;
+    socket.username = username;
+    socket.postId = postId;
+    if (postId && mongoose.Types.ObjectId.isValid(postId)) {
+      socket.join(postId);
+      console.log(`Socket joined post room: ${postId}`);
+    } else if (postId) {
+      console.log(`Invalid postId: ${postId}`);
+      socket.emit('error', { message: 'Invalid post ID' });
+    }
+    next();
+  } catch (error) {
+    console.error('Socket middleware error:', error);
+    next(new Error('Authentication error'));
   }
-  socket.userId = userId;
-  socket.username = username;
-  socket.postId = postId;
-  if (postId && mongoose.Types.ObjectId.isValid(postId)) {
-    socket.join(postId);
-    console.log(`Socket joined post room: ${postId}`);
-  } else if (postId) {
-    console.log(`Invalid postId: ${postId}`);
-    socket.emit('error', { message: 'Invalid post ID' });
-  }
-  next();
 });
 
 io.on('connection', (socket) => {
   console.log('User connected:', socket.username, 'ID:', socket.userId);
 
   socket.on('joinChatRoom', (roomId) => {
-    socket.join(roomId);
-    console.log(`User ${socket.username} (${socket.id}) joined room: ${roomId}`);
-    ChatMessage.find({ roomId })
-    .sort({ createdAt: 1 })
-    .limit(50)
-    .lean()
-    .then(messages => {
-      console.log(`Sending chat history for room ${roomId}:`, messages.length, 'messages');
-      socket.emit('chatHistory', messages);
-    })
-    .catch(err => {
-      console.error('Error fetching chat history:', err);
-      socket.emit('chatError', { message: 'Failed to load chat history' });
-    });
+    try {
+      socket.join(roomId);
+      console.log(`User ${socket.username} (${socket.id}) joined room: ${roomId}`);
+      ChatMessage.find({ roomId })
+        .sort({ createdAt: 1 })
+        .limit(50)
+        .lean()
+        .then(messages => {
+          console.log(`Sending chat history for room ${roomId}:`, messages.length, 'messages');
+          socket.emit('chatHistory', messages);
+        })
+        .catch(err => {
+          console.error('Error fetching chat history:', err);
+          socket.emit('chatError', { message: 'Failed to load chat history' });
+        });
+    } catch (error) {
+      console.error('Error in joinChatRoom:', error);
+    }
   });
 
   socket.on('sendChatMessage', async (data) => {
@@ -255,11 +311,7 @@ io.on('connection', (socket) => {
           mediaType = media.mimetype.startsWith('video') ? 'video' : media.mimetype.includes('gif') ? 'gif' : 'image';
           console.log('Cloudinary upload successful:', { mediaUrl, mediaType });
         } catch (uploadError) {
-          console.error('Cloudinary upload failed:', {
-            message: uploadError.message,
-            name: uploadError.name,
-            http_code: uploadError.http_code
-          });
+          console.error('Cloudinary upload failed:', uploadError);
           throw new Error('Failed to upload media to Cloudinary');
         }
       }
@@ -275,16 +327,10 @@ io.on('connection', (socket) => {
       console.log('Chat message saved:', chatMessage);
       io.to(roomId).emit('chatMessage', chatMessage);
     } catch (error) {
-      console.error('Error sending message:', {
-        message: error.message,
-        name: error.name,
-        http_code: error.http_code
-      });
+      console.error('Error sending message:', error);
       socket.emit('chatError', { message: 'Failed to send message due to server error' });
     }
   });
-
-
 
   socket.on('leaveChatRoom', (roomId) => {
     socket.leave(roomId);
@@ -292,37 +338,54 @@ io.on('connection', (socket) => {
   });
 
   socket.on('textChange', ({ text, senderId }) => {
-    const payload = { text, senderId };
-    socket.to(socket.postId).emit('textChange', payload);
-    redisPublisher.publish(channel, JSON.stringify({ postId: socket.postId, text }));
+    try {
+      const payload = { text, senderId };
+      socket.to(socket.postId).emit('textChange', payload);
+      redisPublisher.publish(channel, JSON.stringify({ postId: socket.postId, text }));
+    } catch (error) {
+      console.error('Error in textChange:', error);
+    }
   });
-  
 
   socket.on('startEditing', (username) => {
-    console.log(`Broadcasting startEditing for user: ${username} to room: ${socket.postId}`);
-    io.to(socket.postId).emit('startEditing', username);
+    try {
+      console.log(`Broadcasting startEditing for user: ${username} to room: ${socket.postId}`);
+      io.to(socket.postId).emit('startEditing', username);
+    } catch (error) {
+      console.error('Error in startEditing:', error);
+    }
   });
 
   socket.on('canvasUpdate', (data) => {
-    socket.broadcast.emit('canvasUpdate', data);
+    try {
+      socket.broadcast.emit('canvasUpdate', data);
+    } catch (error) {
+      console.error('Error in canvasUpdate:', error);
+    }
   });
 
-socket.on('cursorMove', ({ position }) => {
-  socket.to(socket.postId).emit('cursorUpdate', {
-    userId: socket.userId,
-    socketId: socket.id,
-    username: socket.username,
-    position
+  socket.on('cursorMove', ({ position }) => {
+    try {
+      socket.to(socket.postId).emit('cursorUpdate', {
+        userId: socket.userId,
+        socketId: socket.id,
+        username: socket.username,
+        position
+      });
+    } catch (error) {
+      console.error('Error in cursorMove:', error);
+    }
   });
-});
-
 
   socket.on('joinPostRoom', (postId) => {
-    socket.postId = postId; // Set postId on the socket
-    socket.join(postId);
-    console.log(`User ${socket.username} (${socket.userId}) joined room: ${postId}`);
+    try {
+      socket.postId = postId;
+      socket.join(postId);
+      console.log(`User ${socket.username} (${socket.userId}) joined room: ${postId}`);
+    } catch (error) {
+      console.error('Error in joinPostRoom:', error);
+    }
   });
-
 
   socket.on('saveChanges', async (text) => {
     try {
@@ -344,34 +407,66 @@ socket.on('cursorMove', ({ position }) => {
     }
   });
 
-  socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.username, 'ID:', socket.userId);
-    socket.to(socket.postId).emit('cursorRemove', { socketId: socket.id });
+  socket.on('disconnect', (reason) => {
+    console.log('User disconnected:', socket.username, 'ID:', socket.userId, 'Reason:', reason);
+    try {
+      socket.to(socket.postId).emit('cursorRemove', { socketId: socket.id });
+    } catch (error) {
+      console.error('Error during disconnect:', error);
+    }
+  });
+
+  socket.on('error', (error) => {
+    console.error('Socket error:', error);
   });
 });
 
 app.use('/api', postRoutes);
 app.use('/api', askronyai);
 app.use('/api', draftRoutes);
-// app.use('/api', meetingRoutes);
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
+// Keep-alive function with error handling
 function sendRequest() {
-  axios.get(process.env.API_LIVE_URL)
+  axios.get(process.env.API_LIVE_URL || `http://localhost:${process.env.PORT || 3000}/health`, {
+    timeout: 10000
+  })
     .then(response => {
       console.log(`Keep-alive request successful with status: ${response.status}`);
     })
     .catch(error => {
       console.error('Error in keep-alive request:', error.message);
-      console.error(error.response ? error.response.data : error.message);
     });
 }
 
 function keepAlive() {
-  setInterval(sendRequest, 20 * 60 * 1000);
+  if (process.env.NODE_ENV === 'production') {
+    setInterval(sendRequest, 20 * 60 * 1000);
+  }
 }
 
 const port = process.env.PORT || 3000;
-server.listen(port, () => {
+server.listen(port, '0.0.0.0', () => {
   console.log(`Server running on port ${port}`);
   keepAlive();
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  server.close(() => {
+    console.log('HTTP server closed');
+    mongoose.connection.close(false, () => {
+      console.log('MongoDB connection closed');
+      process.exit(0);
+    });
+  });
 });
