@@ -696,70 +696,35 @@ router.post('/:postId/add-collaborator', async (req, res) => {
   }
 });
 
-// Enhanced Gmail transporter with Render.com compatibility
 const createTransporter = () => {
-  // For Render.com, we'll use Gmail but with very conservative settings
-  const transporter = nodemailer.createTransport({
+  return nodemailer.createTransport({
     service: 'gmail',
     auth: {
       user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS, // Make sure this is an App Password
+      pass: process.env.EMAIL_PASS,
     },
-    // Conservative settings for Render.com
-    socketTimeout: 10000, // 10 seconds timeout
-    connectionTimeout: 10000, // 10 seconds connection timeout
-    greetingTimeout: 10000, // 10 seconds greeting timeout
-    secure: true,
-    tls: {
-      rejectUnauthorized: false // Bypass certificate validation if needed
-    }
+    socketTimeout: 5000,
+    connectionTimeout: 5000,
+    secure: true
   });
-
-  return transporter;
 };
-
-// Test email configuration with timeout
-const testEmailConfig = async () => {
-  try {
-    const transporter = createTransporter();
-    
-    // Use Promise.race to timeout the email test
-    const testPromise = transporter.verify();
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Email test timeout')), 5000)
-    );
-    
-    await Promise.race([testPromise, timeoutPromise]);
-    console.log('Email configuration is working correctly');
-    return true;
-  } catch (error) {
-    console.warn('Email configuration test failed:', error.message);
-    console.warn('Email features will be disabled to prevent server crashes');
-    return false;
-  }
-};
-
-let emailEnabled = false;
-
-// Test email config but don't block server startup
-testEmailConfig().then(result => {
-  emailEnabled = result;
-}).catch(err => {
-  console.error('Email test error:', err);
-  emailEnabled = false;
-});
 
 router.post('/send-collab-invite', async (req, res) => {
   const { userEmail, authorMail, authorName, postTitle, postDescription, workspaceLink } = req.body;
 
-  // If email is disabled, return success but log it
-  if (!emailEnabled) {
-    console.log('Email service disabled - would have sent invitation to:', userEmail);
-    return res.status(200).json({
-      message: 'Invitation processed (email service temporarily unavailable)'
-    });
-  }
+  // IMMEDIATELY respond to the client - don't wait for email
+  res.status(200).json({ 
+    message: 'Invitation processed successfully' 
+  });
 
+  // Then attempt to send email in background (non-blocking)
+  sendEmailInBackground({
+    userEmail, authorMail, authorName, postTitle, postDescription, workspaceLink
+  });
+});
+
+// Separate function for background email sending
+async function sendEmailInBackground({ userEmail, authorMail, authorName, postTitle, postDescription, workspaceLink }) {
   const mailOptions = {
     from: process.env.EMAIL_USER,
     to: userEmail,
@@ -826,32 +791,21 @@ router.post('/send-collab-invite', async (req, res) => {
   try {
     const transporter = createTransporter();
     
-    // Use Promise.race to timeout the email sending
-    const sendPromise = transporter.sendMail(mailOptions);
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Email sending timeout')), 10000)
+    // Use a simple timeout approach
+    const emailPromise = transporter.sendMail(mailOptions);
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Email timeout')), 8000)
     );
 
-    await Promise.race([sendPromise, timeoutPromise]);
-    
-    console.log('Invitation email sent successfully to:', userEmail);
-    res.status(200).json({ message: 'Invitation sent Successfully' });
+    await Promise.race([emailPromise, timeoutPromise]);
+    console.log('✓ Invitation email sent successfully to:', userEmail);
     
   } catch (error) {
-    console.error('Error sending email:', error.message);
-    
-    // Disable email on persistent failures
-    if (error.message.includes('timeout') || error.message.includes('ETIMEDOUT')) {
-      console.warn('Disabling email service due to timeout');
-      emailEnabled = false;
-    }
-    
-    // Always return success to the client even if email fails
-    res.status(200).json({
-      message: 'Invitation processed (email may not have been sent due to service issues)'
-    });
+    // Just log the error - don't affect the user experience
+    console.log('✗ Email sending failed (normal on Render.com):', error.message);
   }
-});
+}
+
 
 router.post('/:currentuserid/:method/:userid', async (req, res) => {
   const { currentuserid, method, userid } = req.params;
@@ -1481,7 +1435,6 @@ const initializeScheduledPosts = async () => {
     console.error('Error initializing scheduled posts:', error);
   }
 };
-
 
 initializeScheduledPosts()
 
