@@ -8,20 +8,26 @@ const transporter = nodemailer.createTransport({
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
+  connectionTimeout: 10000,
+  socketTimeout: 10000,
 });
 
-
-transporter.verify((error, success) => {
-  if (error) {
-    console.error('Nodemailer configuration error:', error);
-    process.exit(1);
-  } else {
-    console.log('Nodemailer ready to send emails');
-  }
-  if (success) {
-    console.log('Nodemailer configuration verified successfully');
-  }
-});
+// Avoid crashing the whole server if email config/network is bad (common on Render).
+// In production we just skip verification and log send errors instead.
+if (process.env.NODE_ENV === 'development') {
+  transporter.verify((error, success) => {
+    if (error) {
+      console.error('Nodemailer configuration error (development):', error);
+    } else {
+      console.log('Nodemailer ready to send emails');
+      if (success) {
+        console.log('Nodemailer configuration verified successfully');
+      }
+    }
+  });
+} else {
+  console.log('Skipping Nodemailer verification in non-development environment');
+}
 exports.sendEmailNotification = async (followerId, authorName, postTitle, postId) => {
   // const { followerId, authorName, postTitle, postId } = job.data;
   // console.log(`Processing job ${job.id} for follower ${followerId}`);
