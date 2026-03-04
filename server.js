@@ -364,16 +364,54 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('cursorMove', ({ position }) => {
+  socket.on('cursorMove', ({ x, y }) => {
     try {
+      if (!socket.postId) return;
       socket.to(socket.postId).emit('cursorUpdate', {
-        userId: socket.userId,
         socketId: socket.id,
         username: socket.username,
-        position
+        x: x || 0,
+        y: y || 0
       });
     } catch (error) {
       console.error('Error in cursorMove:', error);
+    }
+  });
+
+  socket.on('setEmotion', (emotion) => {
+    try {
+      socket.userEmotion = emotion;
+      if (!socket.postId) return;
+
+      io.to(socket.postId).emit('vibeUpdate', {
+        socketId: socket.id,
+        userId: socket.userId,
+        username: socket.username,
+        emotion
+      });
+    } catch (error) {
+      console.error('Error in setEmotion:', error);
+    }
+  });
+
+  socket.on('addReaction', ({ postId, position, emoji }) => {
+    try {
+      const targetPostId = postId || socket.postId;
+      if (!targetPostId || !position || !emoji) return;
+
+      const reaction = {
+        id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        postId: targetPostId,
+        emoji,
+        position,
+        userId: socket.userId,
+        username: socket.username,
+        createdAt: Date.now()
+      };
+
+      io.to(targetPostId).emit('reactionAdded', reaction);
+    } catch (error) {
+      console.error('Error in addReaction:', error);
     }
   });
 
@@ -382,6 +420,13 @@ io.on('connection', (socket) => {
       socket.postId = postId;
       socket.join(postId);
       console.log(`User ${socket.username} (${socket.userId}) joined room: ${postId}`);
+
+      io.to(postId).emit('presenceUpdate', {
+        type: 'join',
+        socketId: socket.id,
+        userId: socket.userId,
+        username: socket.username
+      });
     } catch (error) {
       console.error('Error in joinPostRoom:', error);
     }
@@ -411,6 +456,12 @@ io.on('connection', (socket) => {
     console.log('User disconnected:', socket.username, 'ID:', socket.userId, 'Reason:', reason);
     try {
       socket.to(socket.postId).emit('cursorRemove', { socketId: socket.id });
+      if (socket.postId) {
+        socket.to(socket.postId).emit('presenceUpdate', {
+          type: 'leave',
+          socketId: socket.id
+        });
+      }
     } catch (error) {
       console.error('Error during disconnect:', error);
     }
